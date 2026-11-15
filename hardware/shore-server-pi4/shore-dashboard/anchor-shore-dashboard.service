@@ -1,0 +1,14 @@
+[Unit]
+Description=ANCHOR shore control dashboard
+After=network-online.target anchor-shore-cse.service
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/anchor/shore-dashboard
+ExecStart=/usr/bin/python3 -u /home/pi/anchor/shore-dashboard/shore_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
