@@ -1,0 +1,11 @@
+# local secrets
+firmware/libraries/AnchorNode/anchor_config.h
+firmware/ota.env
+# build outputs
+build/
+*.bin
+__pycache__/
+# runtime data on the Pis
+**/data/
+**/logs/
+queue.db*

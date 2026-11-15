@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANCHOR Ship</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #121b2e; --line: #22304a; --text: #e6edf7; --muted: #8696b0;
+    --ok: #2fbf71; --warn: #e5a50a; --bad: #e5484d; --accent: #4ea1ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 13px/1.35 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .5px; }
+  header .sub { color: var(--muted); }
+  header .right { margin-left: auto; display: flex; gap: 12px; align-items: center; color: var(--muted); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+          background: var(--panel); border: 1px solid var(--line); font-size: 11px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+  /* one-screen layout: big 3D hull on the left, camera + node cards on the right */
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(380px, 1fr);
+         gap: 12px; padding: 12px 16px; }
+  .side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .panel h2 { font-size: 12px; font-weight: 600; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px;
+              display: flex; align-items: center; gap: 8px; }
+  .panel h2 .grow { flex: 1; }
+  .hullpanel { display: flex; flex-direction: column; min-height: 0; }
+
+  .boat3d { position: relative; flex: 1; min-height: 260px; border-radius: 8px; overflow: hidden;
+            background: radial-gradient(ellipse at 50% 30%, #16294a, #0a1424 75%); border: 2px solid var(--line); transition: border-color .3s; }
+  .boat3d.warn { border-color: var(--warn); } .boat3d.bad { border-color: var(--bad); }
+  .boat3d canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .boat-read { position: absolute; left: 14px; top: 12px; font-variant-numeric: tabular-nums; font-size: 14px;
+               line-height: 1.6; text-shadow: 0 1px 3px #000; }
+  .boat-read b { font-size: 24px; }
+  .boat-src { position: absolute; right: 12px; top: 10px; }
+  .boat-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); background: rgba(10, 18, 32, .6); }
+
+  .cam { position: relative; background: #000; border-radius: 8px; overflow: hidden; height: clamp(120px, 22vh, 300px); }
+  .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+  .metric { background: #0e1626; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; min-width: 0; }
+  .metric .label { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .metric .value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .metric .value small { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .metric .note { color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .metric canvas { width: 100%; height: 20px; display: block; margin-top: 3px; }
+  .state-open { color: var(--warn); } .state-closed { color: var(--ok); }
+  .btn { background: #1b2a45; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+         padding: 2px 9px; font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .hint { font-size: 10px; opacity: .7; text-transform: none; letter-spacing: 0; }
+  .toggle { text-transform: none; letter-spacing: 0; font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 400; }
+
+  @media (max-width: 1000px) {
+    body { height: auto; display: block; }
+    main { grid-template-columns: 1fr; }
+    .boat3d { min-height: 360px; }
+    .side { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚓ ANCHOR</h1>
+  <span class="sub">Ship MN-CSE · cse-ship</span>
+  <div class="right">
+    <span class="pill"><span class="dot" id="cseDot"></span><span id="cseText">CSE</span></span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<main>
+  <section class="panel hullpanel">
+    <h2>Hull attitude<span class="grow"></span>
+      <label class="toggle"><input type="checkbox" id="exag"> 기울기 ×3 과장</label>
+    </h2>
+    <div class="boat3d">
+      <canvas id="boat"></canvas>
+      <div class="boat-read" id="boatRead">-</div>
+      <div class="boat-src"><span class="pill"><span class="dot" id="liveDot"></span><span id="liveText">-</span></span></div>
+      <div class="boat-msg" id="boatMsg" hidden>자세 데이터 없음</div>
+    </div>
+  </section>
+
+  <section class="side">
+    <div class="panel">
+      <h2>Deck camera<span class="grow"></span><span class="pill"><span class="dot" id="camDot"></span><span id="camText">-</span></span></h2>
+      <div class="cam">
+        <img id="cam" alt="camera stream">
+        <div class="msg" id="camMsg" hidden>카메라 없음</div>
+      </div>
+    </div>
+
+    <div class="panel" data-node="bridge">
+      <h2>Bridge · S3<span class="grow"></span><button class="btn" id="zeroBtn" title="지금 자세를 수평(0°)으로 저장">영점 맞추기</button><span class="pill"><span class="dot"></span><span class="link">-</span></span></h2>
+      <div class="metrics">
+        <div class="metric"><div class="label">Roll <span class="hint">+우현↓</span></div><div class="value" id="roll">-</div><div class="note" id="rollNote"></div><canvas data-h="bridge/attitude.roll"></canvas></div>
+        <div class="metric"><div class="label">Pitch <span class="hint">+선수↓</span></div><div class="value" id="pitch">-</div><div class="note" id="pitchNote"></div><canvas data-h="bridge/attitude.pitch"></canvas></div>
+        <div class="metric"><div class="label">GPS</div><div class="value" id="gps">-</div><div class="note" id="gpsNote"></div></div>
+      </div>
+    </div>
+
+    <div class="panel" data-node="engine">
+      <h2>Engine · WROOM<span class="grow"></span><span class="pill"><span class="dot"></span><span class="link">-</span></span></h2>
+      <div class="metrics">
+        <div class="metric"><div class="label">Vibration RMS</div><div class="value" id="vib">-</div><div class="note" id="vibNote"></div><canvas data-h="engine/vibration.vib_rms_g"></canvas></div>
+        <div class="metric"><div class="label">Gas (MQ-2)</div><div class="value" id="gas">-</div><div class="note" id="gasNote"></div><canvas data-h="engine/gas.mq2_v"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel" data-node="cargo">
+      <h2>Cargo · C6<span class="grow"></span><span class="pill"><span class="dot"></span><span class="link">-</span></span></h2>
+      <div class="metrics">
+        <div class="metric"><div class="label">Temperature</div><div class="value" id="temp">-</div><canvas data-h="cargo/climate.temp_c"></canvas></div>
+        <div class="metric"><div class="label">Humidity</div><div class="value" id="rh">-</div><canvas data-h="cargo/climate.rh"></canvas></div>
+        <div class="metric"><div class="label">Hatch</div><div class="value" id="hatch">-</div><div class="note" id="hatchNote"></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => (typeof v === "number" ? v.toFixed(d) : "-");
+const unit = (v, u, d) => typeof v === "number" ? `${v.toFixed(d)}<small>${u}</small>` : "-";
+const NODE_CNT = { bridge: ["bridge/attitude", "bridge/position"], engine: ["engine/vibration", "engine/gas"], cargo: ["cargo/climate", "cargo/hatch"] };
+const nodeLevel = { bridge: "bad", engine: "bad", cargo: "bad" };
+
+function setDot(dot, level) { dot.className = "dot " + level; }
+
+function drawSpark(canvas, pts, now) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const span = 120, recent = pts.filter(p => p[0] > now - span);
+  if (recent.length < 2) return;
+  let lo = Math.min(...recent.map(p => p[1])), hi = Math.max(...recent.map(p => p[1]));
+  if (hi - lo < 1e-6) { hi += 0.5; lo -= 0.5; }
+  const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
+  g.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent");
+  g.lineWidth = 1.5; g.beginPath();
+  recent.forEach((p, i) => {
+    const x = (p[0] - (now - span)) / span * w, y = h - (p[1] - lo) / (hi - lo) * h;
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  });
+  g.stroke();
+}
+
+// ---------- 3D hull (dependency-free canvas renderer) ----------
+// Boat frame: x = bow, y = port, z = up. roll + = starboard down, pitch + = bow down (BRIDGE firmware convention).
+// The hull is drawn semi-transparent so the three sensor nodes inside are visible.
+const boat = { roll: 0, pitch: 0, tRoll: 0, tPitch: 0, live: false, liveAt: 0, cinRoll: 0, cinPitch: 0, cinLive: false };
+const YAW = Math.PI / 2;  // display heading: hull turned 90° to the left
+
+const HULL = (() => {
+  const XS = -1.15, XB = 1.4, B = .5, NS = 22, NP = 8, N = 2.6;
+  const stations = [];
+  for (let i = 0; i <= NS; i++) {
+    const u = i / NS, x = XS + (XB - XS) * u;
+    const b = u <= .4 ? B * (.82 + .18 * Math.sin(u / .4 * Math.PI / 2)) : B * Math.sqrt(Math.max(0, 1 - ((u - .4) / .6) ** 2));
+    const zd = .3 + .14 * u * u;                                            // sheer rises toward the bow
+    const zk = u < .72 ? -.24 : -.24 + .34 * ((u - .72) / .28) ** 2;          // keel sweeps up into the stem
+    const sec = [];
+    for (let j = 0; j <= NP; j++) {                                          // superellipse bilge: keel -> deck edge
+      const t = j / NP * Math.PI / 2;
+      sec.push([x, b * Math.pow(Math.sin(t), 2 / N), zd - (zd - zk) * Math.pow(Math.cos(t), 2 / N)]);
+    }
+    stations.push(sec);
+  }
+  const faces = [];
+  for (let i = 0; i < NS; i++) {
+    for (let j = 0; j < NP; j++) {
+      const a = stations[i][j], b = stations[i + 1][j], c = stations[i + 1][j + 1], d = stations[i][j + 1];
+      const col = j < 3 ? "#8e2a20" : "#c63b2e";                            // antifouling below, red topsides
+      faces.push({ pts: [a, b, c, d], color: col, alpha: .38, kind: "hull" });
+      faces.push({ pts: [a, b, c, d].map(([x, y, z]) => [x, -y, z]), color: col, alpha: .38, kind: "hull" });
+    }
+  }
+  // deck (port + starboard edges) and transom
+  const edge = stations.map(s => s[NP]);
+  faces.push({ pts: [...edge, ...edge.slice().reverse().map(([x, y, z]) => [x, -y, z])], color: "#dfe3ea", alpha: .22, kind: "deck" });
+  const st = stations[0];
+  faces.push({ pts: [...st, ...st.slice().reverse().map(([x, y, z]) => [x, -y, z])], color: "#a8322a", alpha: .45, kind: "hull" });
+  // cabin (glass-like) and mast
+  const box = (x0, x1, y0, y1, z0, z1, color, alpha) => {
+    const P = (x, y, z) => [x, y, z];
+    [[P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)],
+     [P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1)],
+     [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)],
+     [P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)],
+     [P(x0, y0, z0), P(x0, y1, z0), P(x0, y1, z1), P(x0, y0, z1)]].forEach(pts => faces.push({ pts, color, alpha, kind: "cabin" }));
+  };
+  box(-.62, .08, -.27, .27, .32, .66, "#e9eef5", .32);
+  box(-.22, -.17, -.025, .025, .66, 1.3, "#9aa4b2", .9);
+  return faces;
+})();
+
+// where each ESP32 node sits inside the hull (boat frame)
+const NODES3D = [
+  { id: "bridge", label: "BRIDGE", p: [-.27, 0, .45] },
+  { id: "engine", label: "ENGINE", p: [-.85, 0, .02] },
+  { id: "cargo", label: "CARGO", p: [.55, 0, .05] },
+];
+
+function xform([x, y, z], r, p) {
+  const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p);
+  const y1 = y * cr - z * sr, z1 = y * sr + z * cr;                        // roll about x
+  const x2 = x * cp + z1 * sp, z2 = -x * sp + z1 * cp;                     // pitch about y
+  const cy = Math.cos(YAW), sy = Math.sin(YAW);
+  return [x2 * cy - y1 * sy, x2 * sy + y1 * cy, z2];                       // display yaw
+}
+
+function rgba(hex, k, a) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = s => Math.min(255, Math.round(((n >> s) & 255) * k));
+  return `rgba(${c(16)},${c(8)},${c(0)},${a})`;
+}
+
+const LEVEL_COLOR = { ok: "#2fbf71", warn: "#e5a50a", bad: "#e5484d" };
+
+function drawBoat() {
+  const cv = $("boat"), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const C = [-2.4, -2.7, 1.55], len = v => Math.hypot(...v);
+  const f = C.map(v => -v / len(C));
+  const rl = Math.hypot(f[1], f[0]), r = [f[1] / rl, -f[0] / rl, 0];
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  const scale = Math.min(w * .62, h) * 1.3, cx = w * .5, cy = h * .54;
+  const proj = p => {
+    const d = [p[0] - C[0], p[1] - C[1], p[2] - C[2]];
+    const zc = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+    return [cx + scale * (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / zc,
+            cy - scale * (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / zc, zc];
+  };
+  const poly = pts => { g.beginPath(); pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath(); };
+
+  // static water plane (world frame) with grid; the hull tilts against it
+  const W = 2.8;
+  poly([[-W, -W], [W, -W], [W, W], [-W, W]].map(([x, y]) => proj([x, y, 0])));
+  g.fillStyle = "rgba(40,110,180,.20)"; g.fill();
+  g.strokeStyle = "rgba(120,180,255,.14)"; g.lineWidth = 1;
+  for (let t = -W; t <= W + 1e-6; t += W / 7) {
+    let a = proj([t, -W, 0]), b = proj([t, W, 0]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    a = proj([-W, t, 0]); b = proj([W, t, 0]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  }
+
+  const k = $("exag").checked ? 3 : 1, D = Math.PI / 180;
+  const ro = boat.roll * k * D, pi = boat.pitch * k * D;
+  const L = [-.3, -.5, .81];
+  const items = HULL.map(face => {
+    const pts = face.pts.map(p => xform(p, ro, pi));
+    const a = pts[0], b = pts[1], c = pts[2];
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const nl = len(n) || 1; n = n.map(v => v / nl);
+    const m = pts.length, ctr = pts.reduce((s, q) => [s[0] + q[0] / m, s[1] + q[1] / m, s[2] + q[2] / m], [0, 0, 0]);
+    const toCam = [C[0] - ctr[0], C[1] - ctr[1], C[2] - ctr[2]];
+    if (n[0] * toCam[0] + n[1] * toCam[1] + n[2] * toCam[2] < 0) n = n.map(v => -v);
+    const lit = .5 + .6 * Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+    const sp = pts.map(proj);
+    return { type: "face", sp, depth: proj(ctr)[2], face, lit };
+  });
+  NODES3D.forEach(nd => {
+    const q = proj(xform(nd.p, ro, pi));
+    items.push({ type: "node", q, depth: q[2], nd });
+  });
+  items.sort((a, b) => b.depth - a.depth);
+
+  for (const it of items) {
+    if (it.type === "face") {
+      poly(it.sp);
+      g.fillStyle = rgba(it.face.color, it.lit, it.face.alpha); g.fill();
+      g.strokeStyle = it.face.kind === "hull" ? "rgba(255,190,180,.10)" : "rgba(255,255,255,.18)";
+      g.lineWidth = .6; g.stroke();
+    } else {
+      const col = LEVEL_COLOR[nodeLevel[it.nd.id]] || "#8696b0", [x, y] = it.q, rad = Math.max(5, scale * .022 / (it.q[2] / 3.8));
+      const glow = g.createRadialGradient(x, y, 0, x, y, rad * 3);
+      glow.addColorStop(0, col + "aa"); glow.addColorStop(1, col + "00");
+      g.fillStyle = glow; g.beginPath(); g.arc(x, y, rad * 3, 0, Math.PI * 2); g.fill();
+      g.fillStyle = col; g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 1; g.stroke();
+      nodeScreen[it.nd.id] = { x, y, rad };
+    }
+  }
+  drawCallouts(g, w, h);
+  const bow = proj(xform([1.42, 0, .44], ro, pi));
+  g.fillStyle = "#8696b0"; g.font = "11px system-ui, sans-serif"; g.fillText("BOW ▸", bow[0] - 18, bow[1] - 10);
+}
+
+// ---------- callouts: leader line from each node to a floating value box ----------
+const nodeScreen = {};
+const callouts = {};  // filled by tick(): { title, rows: [[label, value, color?]], note }
+// box direction from the node, as a fraction of the canvas (x, y)
+const CALLOUT_DIR = { bridge: [.17, -.27], cargo: [-.25, -.2], engine: [.2, .1] };
+
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+function drawCallouts(g, w, h) {
+  const t = performance.now() / 1000;
+  for (const id of ["bridge", "cargo", "engine"]) {
+    const n = nodeScreen[id], c = callouts[id];
+    if (!n || !c) continue;
+    const col = LEVEL_COLOR[nodeLevel[id]] || "#8696b0";
+    const [dx, dy] = CALLOUT_DIR[id];
+
+    // measure the box
+    const padX = 12, rowH = 21, titleH = 20, noteH = c.note ? 16 : 0;
+    g.font = "600 11px system-ui, sans-serif";
+    const titleW = g.measureText(c.title).width;
+    let labW = 0, valW = 0;
+    for (const [lab, val] of c.rows) {
+      g.font = "12px system-ui, sans-serif"; labW = Math.max(labW, g.measureText(lab).width);
+      g.font = "600 15px system-ui, sans-serif"; valW = Math.max(valW, g.measureText(val).width);
+    }
+    g.font = "11px system-ui, sans-serif";
+    const noteW = c.note ? g.measureText(c.note).width : 0;
+    const bw = Math.max(titleW, labW + 14 + valW, noteW) + padX * 2;
+    const bh = titleH + c.rows.length * rowH + noteH + 10;
+
+    // anchor: line ends at the box side facing the node; keep the box inside the canvas
+    const ax = n.x + dx * w, ay = n.y + dy * h;
+    let bx = dx >= 0 ? ax : ax - bw, by = ay - bh / 2;
+    bx = Math.max(8, Math.min(w - bw - 8, bx)); by = Math.max(8, Math.min(h - bh - 8, by));
+    const ex = dx >= 0 ? bx : bx + bw, ey = by + bh / 2;
+
+    // leader line: node -> elbow -> box, with a travelling pulse
+    const kx = ex - (dx >= 0 ? 22 : -22), ky = ey;
+    g.strokeStyle = col; g.globalAlpha = .85; g.lineWidth = 1.4;
+    g.beginPath(); g.moveTo(n.x + Math.sign(kx - n.x) * n.rad * .7, n.y + Math.sign(ky - n.y) * n.rad * .7);
+    g.lineTo(kx, ky); g.lineTo(ex, ey); g.stroke();
+    const ph = (t * .6 + id.length * .13) % 1;
+    const px = n.x + (kx - n.x) * ph, py = n.y + (ky - n.y) * ph;
+    g.fillStyle = col; g.beginPath(); g.arc(px, py, 2.2, 0, Math.PI * 2); g.fill();
+    g.globalAlpha = 1;
+
+    // box
+    roundRect(g, bx, by, bw, bh, 7);
+    g.fillStyle = "rgba(10,18,34,.86)"; g.fill();
+    g.strokeStyle = col; g.lineWidth = 1.5; g.stroke();
+    g.fillStyle = col; g.fillRect(bx + 1, by + 6, 3, bh - 12);
+    g.fillStyle = "#8696b0"; g.font = "600 11px system-ui, sans-serif"; g.textBaseline = "middle";
+    g.fillText(c.title, bx + padX, by + 6 + titleH / 2 - 2);
+    c.rows.forEach(([lab, val, vcol], i) => {
+      const yy = by + titleH + 6 + rowH * i + rowH / 2 - 2;
+      g.fillStyle = "#a9b6cc"; g.font = "12px system-ui, sans-serif"; g.fillText(lab, bx + padX, yy);
+      g.fillStyle = vcol || "#e6edf7"; g.font = "600 15px system-ui, sans-serif";
+      g.textAlign = "right"; g.fillText(val, bx + bw - padX, yy); g.textAlign = "left";
+    });
+    if (c.note) {
+      g.fillStyle = "#e5a50a"; g.font = "11px system-ui, sans-serif";
+      g.fillText(c.note, bx + padX, by + bh - noteH / 2 - 6);
+    }
+    g.textBaseline = "alphabetic";
+  }
+}
+
+function updateBoatText() {
+  const r = boat.tRoll, p = boat.tPitch, worst = Math.max(Math.abs(r), Math.abs(p));
+  const el = $("boat").parentElement;
+  el.classList.toggle("warn", boat.live && worst >= 15 && worst < 25);
+  el.classList.toggle("bad", boat.live && worst >= 25);
+  const rs = Math.abs(r) < .5 ? "수평" : `${r > 0 ? "우현" : "좌현"} ${Math.abs(r).toFixed(1)}° 기울어짐`;
+  const ps = Math.abs(p) < .5 ? "수평" : `선수 ${Math.abs(p).toFixed(1)}° ${p > 0 ? "숙임" : "들림"}`;
+  $("boatRead").innerHTML = `Roll <b>${r.toFixed(1)}°</b> · ${rs}<br>Pitch <b>${p.toFixed(1)}°</b> · ${ps}` +
+    ($("exag").checked ? `<br><span style="color:var(--warn)">표시 ×3 과장</span>` : "");
+  $("boatMsg").hidden = boat.live;
+}
+
+let lastFrame = performance.now(), lastText = 0;
+(function animate(t) {
+  t = t || performance.now();
+  const dt = Math.min(.1, (t - lastFrame) / 1000); lastFrame = t;
+  // frame-rate independent easing (~70 ms time constant) between 20 Hz samples
+  const a = 1 - Math.exp(-dt / .07);
+  boat.roll += (boat.tRoll - boat.roll) * a;
+  boat.pitch += (boat.tPitch - boat.pitch) * a;
+  const streaming = t - boat.liveAt < 1500;
+  if (!streaming) { boat.tRoll = boat.cinRoll; boat.tPitch = boat.cinPitch; }
+  boat.live = streaming || boat.cinLive;
+  if (t - lastText > 100) {
+    lastText = t;
+    updateBoatText();
+    setDot($("liveDot"), streaming ? "ok" : boat.cinLive ? "warn" : "bad");
+    $("liveText").textContent = streaming ? "실시간 20Hz" : boat.cinLive ? "CSE 1Hz" : "끊김";
+  }
+  drawBoat();
+  requestAnimationFrame(animate);
+})();
+$("exag").onchange = updateBoatText;
+
+// 20 Hz attitude stream (plain MQTT relayed by the Pi via SSE); falls back to the 1 Hz CIN values
+(function connectLive() {
+  const es = new EventSource("/api/live");
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.topic === "anchor/live/bridge/attitude" && m.data) {
+      boat.tRoll = m.data.r; boat.tPitch = m.data.p; boat.liveAt = performance.now();
+    }
+  };
+  es.onerror = () => { es.close(); setTimeout(connectLive, 3000); };
+})();
+
+async function tick() {
+  let s;
+  try { s = await (await fetch("/api/state", { cache: "no-store" })).json(); }
+  catch { setDot($("cseDot"), "bad"); $("cseText").textContent = "대시보드 연결 끊김"; return; }
+  const L = s.latest, now = s.now;
+  setDot($("cseDot"), s.cse_ok ? "ok" : "bad");
+  $("cseText").textContent = s.cse_ok ? "CSE online" : "CSE 응답 없음";
+  $("clock").textContent = new Date(now * 1000).toLocaleTimeString("ko-KR");
+
+  setDot($("camDot"), s.camera ? "ok" : "bad");
+  $("camText").textContent = s.camera ? "LIVE" : "OFF";
+  $("camMsg").hidden = s.camera; if (!s.camera) $("camMsg").textContent = "카메라 없음: " + (s.camera_error || "");
+
+  document.querySelectorAll("[data-node]").forEach(el => {
+    const items = NODE_CNT[el.dataset.node].map(c => L[c]).filter(Boolean);
+    const ct = Math.max(0, ...items.map(i => i.ct));
+    const age = ct ? now - ct : Infinity;
+    const rssi = items.map(i => i.con.rssi).find(v => typeof v === "number");
+    const level = age < 10 ? "ok" : age < 30 ? "warn" : "bad";  // slowest normal period is 5 s (climate)
+    nodeLevel[el.dataset.node] = level;
+    setDot(el.querySelector("h2 .dot"), level);
+    const label = level === "ok" ? "LIVE" : level === "warn" ? "STALE" : "OFFLINE";
+    el.querySelector(".link").textContent = `${label}${isFinite(age) ? ` · ${age.toFixed(0)}s` : ""}${rssi ? ` · ${rssi}dBm` : ""}`;
+  });
+
+  const att = L["bridge/attitude"]?.con || {};
+  const attItem = L["bridge/attitude"];
+  boat.cinLive = !!attItem && now - attItem.ct < 30 && typeof att.roll === "number";
+  if (boat.cinLive) { boat.cinRoll = att.roll; boat.cinPitch = att.pitch; }
+  $("roll").innerHTML = unit(att.roll, "°", 1);
+  $("pitch").innerHTML = unit(att.pitch, "°", 1);
+  $("rollNote").textContent = typeof att.roll0 === "number" ? `영점 ${att.roll0.toFixed(2)}°` : "";
+  $("pitchNote").textContent = typeof att.pitch0 === "number" ? `영점 ${att.pitch0.toFixed(2)}°` : "";
+  const pos = L["bridge/position"]?.con || {};
+  $("gps").innerHTML = pos.fix ? `${fmt(pos.lat, 4)}<small>N</small>` : (pos.gps === "ok" ? "NO FIX" : pos.gps ? "NO DATA" : "-");
+  $("gpsNote").textContent = pos.fix ? `${fmt(pos.lon, 4)}E · ${pos.sats}sats · ${fmt(pos.sog_kn, 1)}kn` : (pos.gps ? `위성 ${pos.sats ?? 0}개` : "");
+
+  const vib = L["engine/vibration"]?.con || {};
+  $("vib").innerHTML = unit(vib.vib_rms_g, "g", 4);
+  $("vibNote").textContent = typeof vib.vib_peak_g === "number" ? `peak ${vib.vib_peak_g.toFixed(3)} g` : "";
+  const gas = L["engine/gas"]?.con || {};
+  $("gas").innerHTML = unit(gas.mq2_v, "V", 3);
+  $("gasNote").textContent = gas.warm === false ? "예열 중" : gas.warm ? "측정 중" : "";
+
+  const cl = L["cargo/climate"]?.con || {};
+  $("temp").innerHTML = cl.ok === false ? "ERR" : unit(cl.temp_c, "°C", 1);
+  $("rh").innerHTML = cl.ok === false ? "ERR" : unit(cl.rh, "%", 0);
+  const ht = L["cargo/hatch"]?.con || {};
+  $("hatch").innerHTML = ht.state ? `<span class="state-${ht.state}">${ht.state === "open" ? "OPEN" : "CLOSED"}</span>` : "-";
+  $("hatchNote").textContent = ht.state === "open" ? `열림 ${ht.open_s}s · ${ht.changes}회` : ht.state ? `변화 ${ht.changes}회` : "";
+
+  const v = (x, d, u) => typeof x === "number" ? `${x.toFixed(d)} ${u}` : "-";
+  const linkRssi = c => typeof c.rssi === "number" ? `${c.rssi} dBm` : "-";
+  callouts.bridge = { title: "BRIDGE · S3", rows: [
+    ["GPS", pos.fix ? `${fmt(pos.lat, 4)}, ${fmt(pos.lon, 4)}` : pos.gps === "ok" ? "NO FIX" : "-", pos.fix ? null : "#e5a50a"],
+    ["Wi-Fi", linkRssi(att)]] };
+  callouts.engine = { title: "ENGINE · WROOM", rows: [
+    ["Gas", v(gas.mq2_v, 2, "V")],
+    ["Vib", v(vib.vib_rms_g, 4, "g")]], note: gas.warm === false ? "MQ-2 예열 중" : "" };
+  callouts.cargo = { title: "CARGO · C6", rows: [
+    ["Temp", cl.ok === false ? "ERR" : v(cl.temp_c, 1, "°C")],
+    ["Hum", cl.ok === false ? "ERR" : v(cl.rh, 0, "%")],
+    ["Hatch", ht.state ? ht.state.toUpperCase() : "-", ht.state === "open" ? "#e5a50a" : ht.state ? "#2fbf71" : null]] };
+
+  document.querySelectorAll("canvas[data-h]").forEach(c => drawSpark(c, s.history[c.dataset.h] || [], now));
+}
+
+$("zeroBtn").onclick = async () => {
+  if (!confirm("지금 보트 자세를 수평(0°)으로 저장할까요?\n보트를 가만히 둔 상태에서 누르세요. (약 2초 측정)")) return;
+  const b = $("zeroBtn"); b.disabled = true; b.textContent = "측정 중...";
+  try {
+    const r = await (await fetch("/api/bridge/zero", { method: "POST" })).json();
+    b.textContent = r.ok ? "명령 전송됨" : "실패";
+  } catch { b.textContent = "실패"; }
+  setTimeout(() => { b.disabled = false; b.textContent = "영점 맞추기"; }, 3000);
+};
+$("cam").src = "/stream.mjpg";
+$("cam").onerror = () => { $("camMsg").hidden = false; setTimeout(() => $("cam").src = "/stream.mjpg?" + Date.now(), 3000); };
+tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>

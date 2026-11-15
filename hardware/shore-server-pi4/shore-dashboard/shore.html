@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANCHOR Shore</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #121b2e; --line: #22304a; --text: #e6edf7; --muted: #8696b0;
+    --ok: #2fbf71; --warn: #e5a50a; --bad: #e5484d; --accent: #4ea1ff; --replay: #f0a030;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 13px/1.35 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .5px; }
+  header .sub { color: var(--muted); }
+  header .right { margin-left: auto; display: flex; gap: 12px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+          background: var(--panel); border: 1px solid var(--line); font-size: 11px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--replay); } .dot.bad { background: var(--bad); }
+
+  /* status banner: the first thing the audience reads */
+  .banner { margin: 10px 16px 0; padding: 10px 16px; border-radius: 10px; display: flex; align-items: center; gap: 14px;
+            border: 1px solid var(--line); background: var(--panel); transition: background .4s, border-color .4s; }
+  .banner .big { font-size: 20px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; }
+  .banner .detail { color: var(--muted); }
+  .banner .num { margin-left: auto; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .banner .num small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .banner.ONLINE { border-color: #1f6e46; background: linear-gradient(90deg, #12301f, var(--panel) 70%); }
+  .banner.ONLINE .big { color: var(--ok); }
+  .banner.OUTAGE { border-color: var(--bad); background: linear-gradient(90deg, #4a1518, var(--panel) 75%); animation: pulse 1.6s infinite; }
+  .banner.OUTAGE .big { color: #ff6b70; }
+  .banner.CATCHING_UP { border-color: var(--replay); background: linear-gradient(90deg, #4a3210, var(--panel) 75%); }
+  .banner.CATCHING_UP .big { color: var(--replay); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(229, 72, 77, .25); } }
+
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, 1fr);
+         gap: 12px; padding: 10px 16px 12px; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 0; }
+  .panel h2 { font-size: 12px; font-weight: 600; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px;
+              display: flex; align-items: center; gap: 8px; }
+  .panel h2 .grow { flex: 1; }
+  .legend { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; display: flex; gap: 10px; align-items: center; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  .metric { background: #0e1626; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; min-width: 0; }
+  .metric .label { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .metric .value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .metric .value small { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .strip { width: 100%; height: 36px; display: block; margin-top: 8px; }
+
+  .charts { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; min-height: 0; }
+  .chart { background: #0e1626; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; min-height: 120px; }
+  .chart .t { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .chart .t b { color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .chart canvas { flex: 1; width: 100%; min-height: 0; display: block; }
+
+  .hullpanel { flex: 1.25; display: flex; flex-direction: column; }
+  .boat3d { position: relative; flex: 1; min-height: 200px; border-radius: 8px; overflow: hidden;
+            background: radial-gradient(ellipse at 50% 30%, #16294a, #0a1424 75%); border: 2px solid var(--line); }
+  .boat3d canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .boat-read { position: absolute; left: 12px; top: 10px; font-variant-numeric: tabular-nums; font-size: 13px; line-height: 1.6; text-shadow: 0 1px 3px #000; }
+  .boat-read b { font-size: 20px; }
+  .boat-stale { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 12px; background: rgba(74, 21, 24, .85);
+                color: #ffb3b5; font-size: 12px; text-align: center; }
+  .boat3d.frozen canvas { filter: grayscale(.85) brightness(.75); }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1; min-height: 0; }
+  .cam { position: relative; background: #000; border-radius: 8px; overflow: hidden; height: 100%; min-height: 110px; }
+  .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 8px;
+              background: rgba(10, 18, 32, .7); }
+  .campanel, .logpanel { display: flex; flex-direction: column; }
+  .log { flex: 1; overflow: auto; margin: 0; padding: 0; list-style: none; font-size: 12px; min-height: 0; }
+  .log li { padding: 4px 0 4px 10px; border-left: 3px solid var(--line); margin-bottom: 4px; }
+  .log li time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .log li.outage { border-color: var(--bad); } .log li.recover { border-color: var(--replay); }
+  .log li.synced { border-color: var(--ok); } .log li.ship { border-color: var(--accent); color: #b9c7dc; }
+
+  @media (max-width: 1000px) {
+    body { height: auto; display: block; }
+    main { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .charts { grid-template-columns: 1fr; grid-template-rows: none; }
+    .chart { height: 150px; }
+    .boat3d { min-height: 300px; }
+    .row2 { grid-template-columns: 1fr; }
+    .cam { height: 200px; }
+    .log { max-height: 260px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚓ ANCHOR</h1>
+  <span class="sub">육상 관제 · Shore IN-CSE cse-in</span>
+  <div class="right">
+    <span class="pill"><span class="dot" id="srvDot"></span><span id="srvText">-</span></span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<div class="banner" id="banner">
+  <div>
+    <div class="big" id="bannerBig">연결 대기</div>
+    <div class="detail" id="bannerDetail">선박 데이터를 기다리는 중</div>
+  </div>
+  <div class="num" id="bannerNum"></div>
+</div>
+
+<main>
+  <section class="col">
+    <div class="panel">
+      <h2>Ship ↔ Shore link<span class="grow"></span>
+        <span class="legend"><span><span class="sw" style="background:var(--ok)"></span>수신</span>
+          <span><span class="sw" style="background:var(--bad)"></span>두절</span>
+          <span><span class="sw" style="background:var(--replay)"></span>복구됨</span></span>
+      </h2>
+      <div class="metrics">
+        <div class="metric"><div class="label">마지막 수신</div><div class="value" id="mAge">-</div></div>
+        <div class="metric"><div class="label">전송 지연</div><div class="value" id="mDelay">-</div></div>
+        <div class="metric"><div class="label">링크 RTT</div><div class="value" id="mRtt">-</div></div>
+        <div class="metric"><div class="label">선박 Wi-Fi</div><div class="value" id="mWifi">-</div></div>
+        <div class="metric"><div class="label">두절 횟수</div><div class="value" id="mOut">-</div></div>
+        <div class="metric"><div class="label">복구된 데이터</div><div class="value" id="mRep">-</div></div>
+      </div>
+      <canvas class="strip" id="strip"></canvas>
+    </div>
+
+    <div class="panel" style="flex:1; display:flex; flex-direction:column">
+      <h2>Ship telemetry · 최근 10분 (선박 생성 시각 기준)<span class="grow"></span>
+        <span class="legend"><span><span class="sw" style="background:var(--accent)"></span>실시간 수신</span>
+          <span><span class="sw" style="background:var(--replay)"></span>두절 후 복구</span></span>
+      </h2>
+      <div class="charts">
+        <div class="chart"><div class="t"><span>Roll / Pitch (°)</span><b id="vAtt">-</b></div><canvas data-keys="roll,pitch" data-unit="°"></canvas></div>
+        <div class="chart"><div class="t"><span>Engine vibration RMS (g)</span><b id="vVib">-</b></div><canvas data-keys="vib" data-unit="g"></canvas></div>
+        <div class="chart"><div class="t"><span>Cargo temperature (°C)</span><b id="vTemp">-</b></div><canvas data-keys="temp" data-unit="°C"></canvas></div>
+        <div class="chart"><div class="t"><span>Engine gas MQ-2 (V)</span><b id="vGas">-</b></div><canvas data-keys="gas" data-unit="V"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="panel hullpanel">
+      <h2>Vessel · 마지막 보고 자세<span class="grow"></span><span class="pill"><span class="dot" id="hullDot"></span><span id="hullText">-</span></span></h2>
+      <div class="boat3d" id="boatBox">
+        <canvas id="boat"></canvas>
+        <div class="boat-read" id="boatRead">-</div>
+        <div class="boat-stale" id="boatStale" hidden></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="panel campanel">
+        <h2>Ship camera · 원격<span class="grow"></span><span class="pill"><span class="dot" id="camDot"></span><span id="camText">-</span></span></h2>
+        <div class="cam"><img id="cam" alt="ship camera"><div class="msg" id="camMsg">연결 중…</div></div>
+      </div>
+      <div class="panel logpanel">
+        <h2>Event log</h2>
+        <ul class="log" id="log"></ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const C = { ok: "#2fbf71", bad: "#e5484d", replay: "#f0a030", accent: "#4ea1ff", accent2: "#b18cff", muted: "#8696b0", line: "#22304a" };
+const WIN = 600;  // chart window, seconds
+let S = null;     // last /api/state
+const nodeLevel = { bridge: "bad", engine: "bad", cargo: "bad" };
+const PHASE = {
+  WAITING: ["연결 대기", "선박 데이터를 기다리는 중"],
+  ONLINE: ["선박 링크 정상", "선박 MN-CSE의 데이터가 실시간으로 육상 IN-CSE에 복제되고 있습니다"],
+  OUTAGE: ["선박 통신 두절", "선박은 자체 운용 중 · 센서 데이터는 선박 게이트웨이에 보관되고 있습니다"],
+  CATCHING_UP: ["링크 복구 · 보관 데이터 동기화 중", "두절 동안 선박에 쌓인 데이터를 순서대로 받고 있습니다"],
+};
+const fmtS = s => s == null ? "-" : s < 60 ? `${s.toFixed(0)}초` : `${Math.floor(s / 60)}분 ${Math.round(s % 60)}초`;
+const hhmmss = t => new Date(t * 1000).toLocaleTimeString("ko-KR", { hour12: false });
+const num = (v, d, u) => typeof v === "number" ? `${v.toFixed(d)}<small>${u}</small>` : "-";
+
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  return [g, w, h];
+}
+
+// outage bands in chart time: completed ones are "recovered" (amber), the running one is red
+function bands(now) {
+  return (S?.link.outages || []).map(o => ({ a: o.start, b: o.end ?? now, live: o.end == null }));
+}
+
+// ---------- link strip: green = data flowing, red = outage now, amber = outage whose data was recovered ----------
+function drawStrip(now) {
+  const [g, w, h] = fitCanvas($("strip"));
+  const x = t => (t - (now - WIN)) / WIN * w, bh = h - 14;   // bar on top, time labels below
+  g.fillStyle = S?.link.age == null ? C.line : "#1d5c3c"; g.fillRect(0, 4, w, bh - 6);
+  for (const b of bands(now)) {
+    const xa = Math.max(0, x(b.a)), xb = Math.min(w, x(b.b));
+    if (xb <= 0) continue;
+    g.fillStyle = b.live ? C.bad : C.replay; g.fillRect(xa, 1, xb - xa, bh);
+    if (!b.live) { g.strokeStyle = C.bad; g.lineWidth = 1.5; g.strokeRect(xa + .75, 1.75, xb - xa - 1.5, bh - 1.5); }
+    g.fillStyle = "#0b1220"; g.font = "600 11px system-ui, sans-serif"; g.textBaseline = "middle";
+    const label = b.live ? `두절 ${fmtS(b.b - b.a)}` : `${fmtS(b.b - b.a)} 두절 · 복구됨`;
+    if (xb - xa > g.measureText(label).width + 10) g.fillText(label, xa + 6, 1 + bh / 2);
+  }
+  g.fillStyle = C.muted; g.font = "10px system-ui, sans-serif"; g.textBaseline = "alphabetic";
+  g.fillText("-10분", 2, h); g.textAlign = "right"; g.fillText("지금", w - 2, h); g.textAlign = "left";
+}
+
+// ---------- telemetry chart with outage bands and backfilled points ----------
+function drawChart(cv, now) {
+  const [g, w, h] = fitCanvas(cv);
+  const keys = cv.dataset.keys.split(","), padL = 34, padB = 14, pw = w - padL - 4, ph = h - padB - 4;
+  const x = t => padL + (t - (now - WIN)) / WIN * pw;
+  const sets = keys.map(k => (S?.series[k] || []).filter(p => p[0] > now - WIN));
+  const all = sets.flat();
+  for (const b of bands(now)) {   // bands first, under the data
+    const xa = Math.max(padL, x(b.a)), xb = Math.min(padL + pw, x(b.b));
+    if (xb <= padL) continue;
+    g.fillStyle = b.live ? "rgba(229,72,77,.18)" : "rgba(240,160,48,.12)"; g.fillRect(xa, 2, xb - xa, ph + 2);
+    g.strokeStyle = b.live ? "rgba(229,72,77,.6)" : "rgba(240,160,48,.45)"; g.setLineDash([3, 3]); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(xa, 2); g.lineTo(xa, ph + 4); g.moveTo(xb, 2); g.lineTo(xb, ph + 4); g.stroke(); g.setLineDash([]);
+    if (b.live) { g.fillStyle = "#ff8a8e"; g.font = "600 11px system-ui"; g.fillText("수신 없음", xa + 5, 14); }
+  }
+  // time grid every 2 minutes
+  g.fillStyle = C.muted; g.font = "10px system-ui, sans-serif"; g.strokeStyle = "rgba(134,150,176,.12)";
+  for (let m = 0; m <= 10; m += 2) {
+    const xx = padL + pw - m * 60 / WIN * pw;
+    g.beginPath(); g.moveTo(xx, 2); g.lineTo(xx, ph + 4); g.stroke();
+    g.textAlign = m ? "center" : "right"; g.fillText(m ? `-${m}m` : "now", xx, h - 2);
+  }
+  g.textAlign = "left";
+  if (all.length < 2) { g.fillStyle = C.muted; g.fillText("데이터 없음", padL + 8, ph / 2); return; }
+  let lo = Math.min(...all.map(p => p[1])), hi = Math.max(...all.map(p => p[1]));
+  if (hi - lo < 1e-6) { hi += .5; lo -= .5; }
+  const pad = (hi - lo) * .15; lo -= pad; hi += pad;
+  const y = v => 4 + ph - (v - lo) / (hi - lo) * ph;
+  g.fillStyle = C.muted; g.textAlign = "right";
+  const dec = hi - lo < .1 ? 3 : hi - lo < 2 ? 2 : 1;
+  g.fillText(hi.toFixed(dec), padL - 4, 12); g.fillText(lo.toFixed(dec), padL - 4, ph + 2); g.textAlign = "left";
+  sets.forEach((pts, i) => {
+    const base = i ? C.accent2 : C.accent;
+    g.lineWidth = 1.5;
+    for (let j = 1; j < pts.length; j++) {
+      const p0 = pts[j - 1], p1 = pts[j];
+      if (p1[0] - p0[0] > 15) continue;  // real gap in the data: do not bridge it
+      g.strokeStyle = p1[2] ? C.replay : base;
+      g.beginPath(); g.moveTo(x(p0[0]), y(p0[1])); g.lineTo(x(p1[0]), y(p1[1])); g.stroke();
+    }
+    g.fillStyle = C.replay;
+    for (const p of pts) if (p[2]) { g.beginPath(); g.arc(x(p[0]), y(p[1]), 1.6, 0, Math.PI * 2); g.fill(); }
+  });
+}
+
+// ---------- 3D hull: same model as the ship dashboard, driven by the 1 Hz replicated attitude ----------
+const boat = { roll: 0, pitch: 0, tRoll: 0, tPitch: 0 };
+const YAW = Math.PI / 2;
+const HULL = (() => {
+  const XS = -1.15, XB = 1.4, B = .5, NS = 22, NP = 8, N = 2.6, stations = [];
+  for (let i = 0; i <= NS; i++) {
+    const u = i / NS, x = XS + (XB - XS) * u;
+    const b = u <= .4 ? B * (.82 + .18 * Math.sin(u / .4 * Math.PI / 2)) : B * Math.sqrt(Math.max(0, 1 - ((u - .4) / .6) ** 2));
+    const zd = .3 + .14 * u * u, zk = u < .72 ? -.24 : -.24 + .34 * ((u - .72) / .28) ** 2, sec = [];
+    for (let j = 0; j <= NP; j++) { const t = j / NP * Math.PI / 2; sec.push([x, b * Math.pow(Math.sin(t), 2 / N), zd - (zd - zk) * Math.pow(Math.cos(t), 2 / N)]); }
+    stations.push(sec);
+  }
+  const faces = [];
+  for (let i = 0; i < NS; i++) for (let j = 0; j < NP; j++) {
+    const a = stations[i][j], b = stations[i + 1][j], c = stations[i + 1][j + 1], d = stations[i][j + 1], col = j < 3 ? "#8e2a20" : "#c63b2e";
+    faces.push({ pts: [a, b, c, d], color: col, alpha: .38, kind: "hull" });
+    faces.push({ pts: [a, b, c, d].map(([x, y, z]) => [x, -y, z]), color: col, alpha: .38, kind: "hull" });
+  }
+  const edge = stations.map(s => s[NP]);
+  faces.push({ pts: [...edge, ...edge.slice().reverse().map(([x, y, z]) => [x, -y, z])], color: "#dfe3ea", alpha: .22, kind: "deck" });
+  const st = stations[0];
+  faces.push({ pts: [...st, ...st.slice().reverse().map(([x, y, z]) => [x, -y, z])], color: "#a8322a", alpha: .45, kind: "hull" });
+  const box = (x0, x1, y0, y1, z0, z1, color, alpha) => {
+    const P = (x, y, z) => [x, y, z];
+    [[P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)], [P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1)],
+     [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)], [P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)],
+     [P(x0, y0, z0), P(x0, y1, z0), P(x0, y1, z1), P(x0, y0, z1)]].forEach(pts => faces.push({ pts, color, alpha, kind: "cabin" }));
+  };
+  box(-.62, .08, -.27, .27, .32, .66, "#e9eef5", .32);
+  box(-.22, -.17, -.025, .025, .66, 1.3, "#9aa4b2", .9);
+  return faces;
+})();
+const NODES3D = [{ id: "bridge", p: [-.27, 0, .45] }, { id: "engine", p: [-.85, 0, .02] }, { id: "cargo", p: [.55, 0, .05] }];
+const LEVEL_COLOR = { ok: C.ok, warn: C.replay, bad: C.bad };
+function xform([x, y, z], r, p) {
+  const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p);
+  const y1 = y * cr - z * sr, z1 = y * sr + z * cr, x2 = x * cp + z1 * sp, z2 = -x * sp + z1 * cp;
+  const cy = Math.cos(YAW), sy = Math.sin(YAW);
+  return [x2 * cy - y1 * sy, x2 * sy + y1 * cy, z2];
+}
+function rgba(hex, k, a) {
+  const n = parseInt(hex.slice(1), 16), c = s => Math.min(255, Math.round(((n >> s) & 255) * k));
+  return `rgba(${c(16)},${c(8)},${c(0)},${a})`;
+}
+const nodeScreen = {}, callouts = {};
+const CALLOUT_DIR = { bridge: [.15, -.3], cargo: [-.24, -.22], engine: [.18, .12] };
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function drawBoat() {
+  const cv = $("boat"); if (!cv.clientWidth) return;
+  const [g, w, h] = fitCanvas(cv);
+  const Cam = [-2.4, -2.7, 1.55], len = v => Math.hypot(...v), f = Cam.map(v => -v / len(Cam));
+  const rl = Math.hypot(f[1], f[0]), r = [f[1] / rl, -f[0] / rl, 0];
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  const scale = Math.min(w * .62, h) * 1.2, cx = w * .5, cy = h * .55;
+  const proj = p => { const d = [p[0] - Cam[0], p[1] - Cam[1], p[2] - Cam[2]], zc = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+    return [cx + scale * (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / zc, cy - scale * (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / zc, zc]; };
+  const poly = pts => { g.beginPath(); pts.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath(); };
+  const W = 2.8;
+  poly([[-W, -W], [W, -W], [W, W], [-W, W]].map(([x, y]) => proj([x, y, 0]))); g.fillStyle = "rgba(40,110,180,.20)"; g.fill();
+  g.strokeStyle = "rgba(120,180,255,.14)"; g.lineWidth = 1;
+  for (let t = -W; t <= W + 1e-6; t += W / 7) {
+    let a = proj([t, -W, 0]), b = proj([t, W, 0]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    a = proj([-W, t, 0]); b = proj([W, t, 0]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  }
+  const D = Math.PI / 180, ro = boat.roll * D, pi = boat.pitch * D, L = [-.3, -.5, .81];
+  const items = HULL.map(face => {
+    const pts = face.pts.map(p => xform(p, ro, pi)), a = pts[0], b = pts[1], c = pts[2];
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const nl = len(n) || 1; n = n.map(v => v / nl);
+    const m = pts.length, ctr = pts.reduce((s, q) => [s[0] + q[0] / m, s[1] + q[1] / m, s[2] + q[2] / m], [0, 0, 0]);
+    const toCam = [Cam[0] - ctr[0], Cam[1] - ctr[1], Cam[2] - ctr[2]];
+    if (n[0] * toCam[0] + n[1] * toCam[1] + n[2] * toCam[2] < 0) n = n.map(v => -v);
+    return { type: "face", sp: pts.map(proj), depth: proj(ctr)[2], face, lit: .5 + .6 * Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) };
+  });
+  NODES3D.forEach(nd => { const q = proj(xform(nd.p, ro, pi)); items.push({ type: "node", q, depth: q[2], nd }); });
+  items.sort((a, b) => b.depth - a.depth);
+  for (const it of items) {
+    if (it.type === "face") {
+      poly(it.sp); g.fillStyle = rgba(it.face.color, it.lit, it.face.alpha); g.fill();
+      g.strokeStyle = it.face.kind === "hull" ? "rgba(255,190,180,.10)" : "rgba(255,255,255,.18)"; g.lineWidth = .6; g.stroke();
+    } else {
+      const col = LEVEL_COLOR[nodeLevel[it.nd.id]] || C.muted, [x, y] = it.q, rad = Math.max(5, scale * .022 / (it.q[2] / 3.8));
+      const glow = g.createRadialGradient(x, y, 0, x, y, rad * 3); glow.addColorStop(0, col + "aa"); glow.addColorStop(1, col + "00");
+      g.fillStyle = glow; g.beginPath(); g.arc(x, y, rad * 3, 0, Math.PI * 2); g.fill();
+      g.fillStyle = col; g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 1; g.stroke();
+      nodeScreen[it.nd.id] = { x, y, rad };
+    }
+  }
+  for (const id of ["bridge", "cargo", "engine"]) {
+    const n = nodeScreen[id], c = callouts[id]; if (!n || !c) continue;
+    const col = LEVEL_COLOR[nodeLevel[id]] || C.muted, [dx, dy] = CALLOUT_DIR[id], padX = 10, rowH = 19, titleH = 18;
+    g.font = "600 11px system-ui"; let bw = g.measureText(c.title).width;
+    for (const [lab, val] of c.rows) { g.font = "11px system-ui"; const lw = g.measureText(lab).width; g.font = "600 14px system-ui"; bw = Math.max(bw, lw + 12 + g.measureText(val).width); }
+    bw += padX * 2; const bh = titleH + c.rows.length * rowH + 8;
+    const ax = n.x + dx * w, ay = n.y + dy * h;
+    let bx = dx >= 0 ? ax : ax - bw, by = ay - bh / 2;
+    bx = Math.max(6, Math.min(w - bw - 6, bx)); by = Math.max(66, Math.min(h - bh - 34, by));  // clear of the roll/pitch text
+    const ex = dx >= 0 ? bx : bx + bw, ey = by + bh / 2, kx = ex - (dx >= 0 ? 18 : -18);
+    g.strokeStyle = col; g.globalAlpha = .85; g.lineWidth = 1.3;
+    g.beginPath(); g.moveTo(n.x, n.y); g.lineTo(kx, ey); g.lineTo(ex, ey); g.stroke(); g.globalAlpha = 1;
+    roundRect(g, bx, by, bw, bh, 6); g.fillStyle = "rgba(10,18,34,.88)"; g.fill(); g.strokeStyle = col; g.lineWidth = 1.4; g.stroke();
+    g.textBaseline = "middle"; g.fillStyle = C.muted; g.font = "600 11px system-ui"; g.fillText(c.title, bx + padX, by + 4 + titleH / 2);
+    c.rows.forEach(([lab, val, vc], i) => {
+      const yy = by + titleH + 4 + rowH * i + rowH / 2;
+      g.fillStyle = "#a9b6cc"; g.font = "11px system-ui"; g.fillText(lab, bx + padX, yy);
+      g.fillStyle = vc || "#e6edf7"; g.font = "600 14px system-ui"; g.textAlign = "right"; g.fillText(val, bx + bw - padX, yy); g.textAlign = "left";
+    });
+    g.textBaseline = "alphabetic";
+  }
+}
+
+let last = performance.now();
+(function animate(t) {
+  const dt = Math.min(.1, ((t || performance.now()) - last) / 1000); last = t || performance.now();
+  const a = 1 - Math.exp(-dt / .25);   // 1 Hz data: slower easing than the ship's 20 Hz view
+  boat.roll += (boat.tRoll - boat.roll) * a; boat.pitch += (boat.tPitch - boat.pitch) * a;
+  drawBoat();
+  requestAnimationFrame(animate);
+})();
+
+// ---------- camera relayed through the shore Pi ----------
+let camRetry = null;
+function startCam() { $("cam").src = "/stream.mjpg?" + Date.now(); }
+$("cam").onload = () => { $("camMsg").hidden = true; $("cam").style.visibility = ""; };
+$("cam").onerror = () => { $("camMsg").hidden = false; $("cam").style.visibility = "hidden"; clearTimeout(camRetry); camRetry = setTimeout(startCam, 4000); };
+
+// ---------- state polling ----------
+async function tick() {
+  try { S = await (await fetch("/api/state", { cache: "no-store" })).json(); }
+  catch { $("srvDot").className = "dot bad"; $("srvText").textContent = "육상 서버 연결 끊김"; return; }
+  const now = S.now, Lk = S.link, L = S.latest, ship = Lk.ship || {};
+  $("srvDot").className = "dot ok"; $("srvText").textContent = "Shore IN-CSE online";
+  $("clock").textContent = hhmmss(now);
+
+  // banner
+  const ph = Lk.phase, [big, detail] = PHASE[ph] || PHASE.WAITING;
+  $("banner").className = "banner " + ph; $("bannerBig").textContent = big; $("bannerDetail").textContent = detail;
+  $("bannerNum").innerHTML = ph === "OUTAGE" ? `${fmtS(Lk.age)}<small>째 수신 없음</small>`
+    : ph === "CATCHING_UP" ? `${(Lk.cur_delay ?? 0).toFixed(0)}초<small>지연 → 0 · ${Lk.outage_replayed}건 복구</small>`
+    : ph === "ONLINE" ? `${(Lk.cur_delay ?? 0).toFixed(1)}초<small>복제 지연</small>` : "";
+
+  // link metrics
+  const off = ph === "OUTAGE";
+  $("mAge").innerHTML = Lk.age == null ? "-" : `<span style="color:${off ? C.bad : "inherit"}">${Lk.age.toFixed(0)}<small>초 전</small></span>`;
+  $("mDelay").innerHTML = num(Lk.cur_delay, 1, "초");
+  $("mRtt").innerHTML = off ? `<span style="color:${C.bad}">—</span>` : num(ship.rtt_ms, 0, "ms");
+  $("mWifi").innerHTML = off ? `<span style="color:${C.bad}">—</span>` : num(ship.wifi_dbm, 0, "dBm");
+  $("mOut").innerHTML = `${Lk.outages.length}<small>회</small>`;
+  $("mRep").innerHTML = `<span style="color:${Lk.replayed ? C.replay : "inherit"}">${Lk.replayed}</span><small>건</small>`;
+
+  // node levels follow the replicated data's age (ship time)
+  const NODE_CNT = { bridge: ["bridge/attitude"], engine: ["engine/vibration", "engine/gas"], cargo: ["cargo/climate"] };
+  for (const [id, cnts] of Object.entries(NODE_CNT)) {
+    const ages = cnts.map(c => L[c]?.age).filter(v => v != null), age = ages.length ? Math.min(...ages) : Infinity;
+    nodeLevel[id] = off ? "bad" : age < 15 ? "ok" : age < 40 ? "warn" : "bad";
+  }
+
+  // hull
+  const att = L["bridge/attitude"];
+  if (att) { boat.tRoll = att.con.roll; boat.tPitch = att.con.pitch; }
+  const r = att?.con.roll, p = att?.con.pitch;
+  $("boatRead").innerHTML = att ? `Roll <b>${r.toFixed(1)}°</b> ${Math.abs(r) < .5 ? "수평" : r > 0 ? "우현↓" : "좌현↓"}<br>Pitch <b>${p.toFixed(1)}°</b> ${Math.abs(p) < .5 ? "수평" : p > 0 ? "선수↓" : "선수↑"}` : "자세 데이터 없음";
+  $("boatBox").classList.toggle("frozen", off);
+  $("boatStale").hidden = !off;
+  if (off && att) $("boatStale").textContent = `마지막 보고 자세 · ${hhmmss(att.ship_t)} (${fmtS(att.age)} 전) · 현재 자세는 알 수 없음`;
+  $("hullDot").className = "dot " + (off ? "bad" : ph === "CATCHING_UP" ? "warn" : att ? "ok" : "");
+  $("hullText").textContent = off ? "두절" : att ? `1Hz · ${hhmmss(att.ship_t)}` : "-";
+
+  const v = (x, d, u) => typeof x === "number" ? `${x.toFixed(d)} ${u}` : "-";
+  const gas = L["engine/gas"]?.con || {}, vib = L["engine/vibration"]?.con || {}, cl = L["cargo/climate"]?.con || {}, ht = L["cargo/hatch"]?.con || {}, pos = L["bridge/position"]?.con || {};
+  callouts.bridge = { title: "BRIDGE", rows: [["GPS", pos.fix ? `${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}` : pos.gps ? "NO FIX" : "-", pos.fix ? null : C.replay]] };
+  callouts.engine = { title: "ENGINE", rows: [["Gas", v(gas.mq2_v, 2, "V")], ["Vib", v(vib.vib_rms_g, 4, "g")]] };
+  callouts.cargo = { title: "CARGO", rows: [["Temp", v(cl.temp_c, 1, "°C")], ["Hum", v(cl.rh, 0, "%")],
+    ["Hatch", ht.state ? ht.state.toUpperCase() : "-", ht.state === "open" ? C.replay : ht.state ? C.ok : null]] };
+
+  $("vAtt").textContent = att ? `${r.toFixed(1)}° / ${p.toFixed(1)}°` : "-";
+  $("vVib").textContent = v(vib.vib_rms_g, 4, "g"); $("vTemp").textContent = v(cl.temp_c, 1, "°C"); $("vGas").textContent = v(gas.mq2_v, 3, "V");
+
+  // camera follows the link
+  $("camDot").className = "dot " + (off ? "bad" : "ok"); $("camText").textContent = off ? "영상 두절" : "LIVE";
+  if (off) { $("camMsg").hidden = false; $("cam").style.visibility = "hidden"; $("camMsg").textContent = "선박 영상 두절 · 링크 복구 시 자동 재연결"; }
+  else if ($("camMsg").textContent.startsWith("선박 영상 두절")) { $("camMsg").textContent = "재연결 중…"; startCam(); }
+
+  // event log
+  $("log").innerHTML = S.events.map(e => `<li class="${e.kind}"><time>${hhmmss(e.t)}</time>${e.text}</li>`).join("") || `<li>이벤트 없음</li>`;
+
+  drawStrip(now);
+  document.querySelectorAll(".chart canvas").forEach(cv => drawChart(cv, now));
+}
+startCam();
+tick(); setInterval(tick, 1000);
+window.addEventListener("resize", () => S && tick());
+</script>
+</body>
+</html>

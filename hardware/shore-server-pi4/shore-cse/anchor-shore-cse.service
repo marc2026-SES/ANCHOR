@@ -1,0 +1,15 @@
+[Unit]
+Description=ANCHOR shore IN-CSE (ACME)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/anchor/shore-cse
+ExecStartPre=/usr/bin/python3 /home/pi/anchor/shore-cse/check_db.py
+ExecStart=/home/pi/anchor/venv/bin/acmecse --config acme.ini --headless
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
