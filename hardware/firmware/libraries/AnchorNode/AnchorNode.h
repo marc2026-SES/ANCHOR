@@ -14,7 +14,21 @@
 #include <PubSubClient.h>
 #include <functional>
 #include <time.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+#include <esp_system.h>
+#include "ReportProfile.h"
 #include "anchor_config.h"
+
+#ifndef VESSEL_ID
+#define VESSEL_ID "ship-001"
+#endif
+#ifndef ANCHOR_RAW_MAX_RECORDS
+#define ANCHOR_RAW_MAX_RECORDS 20000
+#endif
+#ifndef ANCHOR_RAW_MAX_BYTES
+#define ANCHOR_RAW_MAX_BYTES 5000000
+#endif
 
 #ifndef OTA_PASS
 #define OTA_PASS "change-me"
@@ -46,7 +60,20 @@ class AnchorNode {
   // Receive commands written to <ae>/command (con is passed to the handler as a string).
   void enableCommands(CommandHandler h) { onCommand_ = h; }
 
+  // BRIDGE and ENGINE support the same report cadence command; CARGO stays fixed.
+  void enableReportProfile() { profileEnabled_ = true; }
+  uint32_t reportIntervalMs() { return profile_.current(nowMs()); }
+
   void begin() {
+    char boot[24];
+    snprintf(boot, sizeof boot, "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+    bootId_ = boot;
+    commandPrefs_.begin((String("cmd-") + ae_).c_str(), false);
+    String saved = commandPrefs_.getString("state", "{}");
+    if (deserializeJson(commandState_, saved)) commandState_.clear();
+    profile_.intervalMs = commandState_["intervalMs"] | 1000;
+    profile_.untilMs = commandState_["untilMs"] | (uint64_t)0;
+
     reqTopic_ = String("/oneM2M/req/") + orig_ + "/" + CSE_ID + "/json";
     respTopic_ = String("/oneM2M/resp/") + orig_ + "/" + CSE_ID + "/json";
     notifyTopic_ = String("/oneM2M/req/") + CSE_ID + "/" + orig_ + "/json";
@@ -55,7 +82,7 @@ class AnchorNode {
     WiFi.setSleep(false);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     wifiBeginAt_ = millis();
-    mqtt_.setBufferSize(2048);
+    mqtt_.setBufferSize(8192);
     mqtt_.setKeepAlive(15);
     mqtt_.setCallback([this](char *t, byte *p, unsigned int n) { onMessage(t, p, n); });
     Serial.printf("[NET] Wi-Fi '%s' -> CSE %s:%d as %s\n", WIFI_SSID, CSE_HOST, MQTT_PORT, orig_);
@@ -106,27 +133,38 @@ class AnchorNode {
       mqtt_.subscribe(respTopic_.c_str());
       mqtt_.subscribe(notifyTopic_.c_str());
       Serial.println("[NET] MQTT connected");
+      resultReplayIndex_ = 0;  // persisted device results survive MCU reboot / lost acknowledgements
+
     }
     mqtt_.loop();
     if (!registered_ && millis() - lastRegTry_ > 3000) {
       lastRegTry_ = millis();
       registered_ = registerAll();
     }
+    if (ready()) {
+      if (pendingCommand_.length()) {
+        String command = pendingCommand_;
+        pendingCommand_ = "";
+        handleCommand(command);
+      }
+      replayResults();
+      flushQueue();
+    }
   }
 
   bool ready() { return registered_ && mqtt_.connected(); }
 
-  // con: a JSON object as text, e.g. {"roll":1.2}. Adds seq and ts automatically.
+  // A bounded RAM outbox retries the identical CIN name and payload until the CSE
+  // confirms it. Offline overflow is explicit; power-loss guarantees start at CSE acceptance.
   bool publish(const char *cnt, const String &conJson) {
-    if (!ready()) return false;
-    String con = conJson;
-    con.remove(con.length() - 1);  // drop the closing brace
-    con += String(",\"seq\":") + (seq_++) + ",\"ts\":" + nowMs() + "}";
-    String body = String("{\"op\":1,\"to\":\"") + CSE_NAME + "/" + ae_ + "/" + cnt + "\",\"fr\":\"" + orig_ +
-                  "\",\"rqi\":\"" + nextRqi() + "\",\"rvi\":\"3\",\"ty\":4,\"pc\":{\"m2m:cin\":{\"cnf\":\"application/json:0\",\"con\":\"" +
-                  escape(con) + "\"}}}";
-    sent_++;
-    return mqtt_.publish(reqTopic_.c_str(), body.c_str());
+    JsonDocument con;
+    if (deserializeJson(con, conJson) || !con.is<JsonObject>()) return false;
+    const uint32_t sequence = seq_++;
+    if (queueSize_ >= QUEUE_SIZE) { dropped_++; return false; }
+    addIdentity(con, sequence);
+    String payload;
+    serializeJson(con, payload);
+    return enqueue(cnt, String("hw-") + bootId_ + "-" + sequence, payload);
   }
 
   // Low-latency telemetry outside oneM2M (plain MQTT, not stored by the CSE), e.g. 20 Hz attitude
@@ -145,8 +183,9 @@ class AnchorNode {
   }
 
   void printStats() {
-    Serial.printf("[STAT] sent=%lu ok=%lu err=%lu last_rsc=%d rssi=%d ntp=%s\n", (unsigned long)sent_,
-                  (unsigned long)ok_, (unsigned long)err_, lastRsc_, WiFi.RSSI(), nowMs() ? "synced" : "no");
+    Serial.printf("[STAT] sent=%lu ok=%lu err=%lu queued=%d dropped=%lu last_rsc=%d rssi=%d ntp=%s\n",
+                  (unsigned long)sent_, (unsigned long)ok_, (unsigned long)err_, queueSize_,
+                  (unsigned long)dropped_, lastRsc_, WiFi.RSSI(), nowMs() ? "synced" : "no");
   }
 
   int rssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
@@ -159,6 +198,16 @@ class AnchorNode {
   PubSubClient mqtt_;
   String reqTopic_, respTopic_, notifyTopic_, notifyRespTopic_;
   CommandHandler onCommand_;
+  static constexpr int QUEUE_SIZE = 32;
+  struct Pending { String cnt, rn, con; int phase = 0; };
+  Pending outbox_[QUEUE_SIZE];
+  int queueHead_ = 0, queueSize_ = 0, resultReplayIndex_ = 0;
+  String bootId_, txRqi_, pendingCommand_;
+  uint32_t txAt_ = 0, retryAt_ = 0, dropped_ = 0;
+  bool profileEnabled_ = false, txWaiting_ = false;
+  Preferences commandPrefs_;
+  JsonDocument commandState_;
+  AnchorReportProfile profile_;
   bool registered_ = false, ntpStarted_ = false, otaStarted_ = false, otaActive_ = false;
   uint32_t ntpAt_ = 0, wifiBeginAt_ = 0, lastRegTry_ = 0;
   uint32_t lastTry_ = 0, lastWifiLog_ = 0, rqiN_ = 0, seq_ = 0;
@@ -201,82 +250,171 @@ class AnchorNode {
     Serial.printf("[OTA] ready: anchor-%s @ %s:3232\n", ae_, WiFi.localIP().toString().c_str());
   }
 
-  static String escape(const String &s) {
-    String o;
-    o.reserve(s.length() + 32);
-    for (char c : s) {
-      if (c == '"' || c == '\\') o += '\\';
-      o += c;
+  void addIdentity(JsonDocument &doc, uint32_t sequence) {
+    doc["vesselId"] = VESSEL_ID;
+    doc["deviceId"] = ae_;
+    doc["bootId"] = bootId_;
+    doc["seq"] = sequence;
+    doc["ts"] = nowMs();
+    doc["uptimeMs"] = millis();
+    doc["droppedBefore"] = dropped_;
+    doc["eventId"] = String(VESSEL_ID) + ":" + ae_ + ":" + bootId_ + ":" + sequence;
+  }
+
+  bool enqueue(const String &cnt, const String &rn, const String &con) {
+    for (int i = 0; i < queueSize_; ++i) {
+      const auto &p = outbox_[(queueHead_ + i) % QUEUE_SIZE];
+      if (p.cnt == cnt && p.rn == rn) return p.con == con;
     }
-    return o;
+    if (queueSize_ == QUEUE_SIZE) return false;
+    auto &p = outbox_[(queueHead_ + queueSize_) % QUEUE_SIZE];
+    p.cnt = cnt; p.rn = rn; p.con = con; p.phase = 0;
+    queueSize_++;
+    return true;
   }
 
-  static int findInt(const String &s, const char *key) {
-    int i = s.indexOf(key);
-    if (i < 0) return -1;
-    return s.substring(i + strlen(key)).toInt();
+  void flushQueue() {
+    if (!queueSize_ || (retryAt_ && (int32_t)(millis() - retryAt_) < 0)) return;
+    if (txWaiting_ && millis() - txAt_ < 3000) return;
+    auto &p = outbox_[queueHead_];
+    JsonDocument req;
+    txRqi_ = nextRqi();
+    req["op"] = p.phase == 1 ? 1 : 2;
+    req["to"] = String(CSE_NAME) + "/" + ae_ + "/" + p.cnt + (p.phase == 2 ? "/" + p.rn : "");
+    req["fr"] = orig_; req["rqi"] = txRqi_; req["rvi"] = "3";
+    if (p.phase == 1) {
+      req["ty"] = 4;
+      req["pc"]["m2m:cin"]["rn"] = p.rn;
+      req["pc"]["m2m:cin"]["cnf"] = "application/json:0";
+      req["pc"]["m2m:cin"]["con"] = p.con;
+    }
+    String body; serializeJson(req, body);
+    txAt_ = millis(); txWaiting_ = mqtt_.publish(reqTopic_.c_str(), body.c_str());
+    if (txWaiting_) sent_++;
   }
 
-  // Value of the first "key": "..." string in s (handles optional spaces and \" escapes).
-  static String findStr(const String &s, const char *key) {
-    int i = s.indexOf(String("\"") + key + "\"");
-    if (i < 0) return "";
-    i = s.indexOf(':', i);
-    if (i < 0) return "";
-    i = s.indexOf('"', i);
-    if (i < 0) return "";
-    String o;
-    for (int k = i + 1; k < (int)s.length(); k++) {
-      char c = s[k];
-      if (c == '\\' && k + 1 < (int)s.length()) {
-        o += s[++k];
-      } else if (c == '"') {
-        break;
-      } else {
-        o += c;
+  void queueResponse(JsonDocument &response) {
+    if (!queueSize_) return;
+    txWaiting_ = false;
+    auto &p = outbox_[queueHead_];
+    const int rsc = response["rsc"] | 5000;
+    if (p.phase == 0 && rsc == 2000) {
+      JsonObject cnt = response["pc"]["m2m:cnt"];
+      // Fail closed if the CSE would silently evict accepted history.
+      if (!cnt.isNull() && cnt["mni"].isNull() && cnt["mbs"].isNull() && cnt["mia"].isNull() &&
+          (cnt["cni"] | ANCHOR_RAW_MAX_RECORDS) < ANCHOR_RAW_MAX_RECORDS &&
+          (cnt["cbs"] | ANCHOR_RAW_MAX_BYTES) + p.con.length() < ANCHOR_RAW_MAX_BYTES) {
+        p.phase = 1; return;
       }
+      Serial.println("[BACKPRESSURE] raw container full or eviction enabled; keeping pending data");
+    } else if (p.phase == 1 && rsc == 4105) {
+      p.phase = 2; return;  // lost ACK: compare the actual existing body
+    } else if ((p.phase == 1 && rsc == 2001) ||
+               (p.phase == 2 && rsc == 2000 && response["pc"]["m2m:cin"]["con"].as<String>() == p.con)) {
+      p.cnt = p.rn = p.con = "";
+      queueHead_ = (queueHead_ + 1) % QUEUE_SIZE; queueSize_--; ok_++; return;
+    } else if (p.phase == 2 && rsc == 4004) {
+      p.phase = 0; return;
     }
-    return o;
+    err_++; retryAt_ = millis() + 3000;
   }
 
-  // Notification from the CSE (subscription verification or a new CIN in "command").
-  void onNotify(const String &s) {
-    String rqi = findStr(s, "rqi");
-    String resp = String("{\"rsc\":2000,\"rqi\":\"") + rqi + "\",\"rvi\":\"3\",\"fr\":\"" + orig_ +
-                  "\",\"to\":\"/" + CSE_ID + "\"}";
-    mqtt_.publish(notifyRespTopic_.c_str(), resp.c_str());
-    if (s.indexOf("\"vrq\"") >= 0) {
-      Serial.println("[oneM2M] subscription verified");
+  void replayResults() {
+    JsonArray history = commandState_["history"].as<JsonArray>();
+    if (resultReplayIndex_ >= (int)history.size()) return;
+    JsonObject row = history[resultReplayIndex_];
+    if (enqueue("commandResults", row["rn"].as<String>(), row["result"].as<String>())) resultReplayIndex_++;
+  }
+
+  void handleCommand(const String &raw) {
+    JsonDocument cmd;
+    if (deserializeJson(cmd, raw) || !cmd.is<JsonObject>()) {
+      // Existing on-board calibration buttons remain available.
+      if (onCommand_) onCommand_(raw);
       return;
     }
-    String con = findStr(s, "con");
-    if (con.length()) {
-      Serial.printf("[CMD] %s\n", con.c_str());
-      if (onCommand_) onCommand_(con);
+    if (!profileEnabled_) return;
+    const String id = cmd["commandId"] | "";
+    if (!id.length() || id.length() > 64) return;
+    String normalized; serializeJson(cmd, normalized);
+    JsonArray history = commandState_["history"].as<JsonArray>();
+    if (history.isNull()) history = commandState_["history"].to<JsonArray>();
+    for (JsonObject row : history) {
+      if (row["id"].as<String>() != id) continue;
+      if (row["command"].as<String>() != normalized) { Serial.println("[CMD] conflicting ID rejected"); return; }
+      enqueue("commandResults", row["rn"].as<String>(), row["result"].as<String>());
+      return;  // duplicate never re-applies or extends the original lease
     }
+    const uint64_t now = nowMs();
+    if (!now) return;  // cannot assess TTL before NTP sync; core will retry
+    const uint64_t issued = cmd["issuedAtMs"] | (uint64_t)0;
+    const uint64_t expires = cmd["expiresAtMs"] | (uint64_t)0;
+    const uint32_t duration = cmd["durationMs"] | 0;
+    const uint32_t interval = cmd["intervalMs"] | 0;
+    const String target = cmd["target"] | "";
+    const uint64_t watermark = commandState_["issuedAtMs"] | (uint64_t)0;
+    const String lastId = commandState_["lastId"] | "";
+    const char *status = "applied";
+    if (!cmd["intervalMs"].is<uint32_t>() || !cmd["durationMs"].is<uint32_t>() ||
+        !cmd["issuedAtMs"].is<uint64_t>() || !cmd["expiresAtMs"].is<uint64_t>() ||
+        String(cmd["action"] | "") != "setReportProfile" || String(cmd["issuer"] | "") != "shore" ||
+        (target != ae_ && target != "reportingGroup") || !AnchorReportProfile::valid(interval, duration) ||
+        expires <= issued || expires - issued > 3600000) status = "rejected";
+    else if (now >= expires) status = "expired";
+    else if (now < issued) return;  // retry after the clock catches up
+    else if (issued < watermark || (issued == watermark && id <= lastId)) status = "superseded";
+    JsonDocument result;
+    result["commandId"] = id; result["status"] = status; result["driver"] = "esp32";
+    result["command"].set(cmd.as<JsonObject>());
+    result["requestedIntervalMs"] = interval;
+    if (String(status) == "applied") {
+      commandState_["intervalMs"] = interval;
+      commandState_["untilMs"] = now + duration;
+      commandState_["issuedAtMs"] = issued;
+      commandState_["lastId"] = id;
+      result["appliedAtMs"] = now; result["profileUntilMs"] = now + duration;
+      result["appliedIntervalMs"] = interval;
+    }
+    const uint32_t sequence = seq_++;
+    addIdentity(result, sequence);
+    String resultText; serializeJson(result, resultText);
+    String rn = String("hw-") + bootId_ + "-" + sequence;
+    if (history.size() >= 8) history.remove(0);
+    JsonObject row = history.add<JsonObject>();
+    row["id"] = id; row["command"] = normalized; row["result"] = resultText; row["rn"] = rn;
+    String saved; serializeJson(commandState_, saved);
+    // Persist intent, lease deadline and replayable result together, before applying.
+    if (commandPrefs_.putString("state", saved) != saved.length()) {
+      Serial.println("[CMD] NVS write failed; profile not applied");
+      String old = commandPrefs_.getString("state", "{}");
+      deserializeJson(commandState_, old);
+      return;
+    }
+    profile_.intervalMs = commandState_["intervalMs"] | 1000;
+    profile_.untilMs = commandState_["untilMs"] | (uint64_t)0;
+    resultReplayIndex_ = 0;
+    Serial.printf("[CMD] %s %s interval=%lu ms\n", id.c_str(), status, (unsigned long)reportIntervalMs());
   }
 
   void onMessage(char *topic, byte *p, unsigned int n) {
-    String s;
-    s.reserve(n);
-    for (unsigned int i = 0; i < n; i++) s += (char)p[i];
+    JsonDocument msg;
+    if (deserializeJson(msg, static_cast<const byte *>(p), n)) { err_++; return; }
     if (notifyTopic_ == topic) {
-      onNotify(s);
+      JsonDocument resp;
+      resp["rsc"] = 2000; resp["rqi"] = msg["rqi"]; resp["rvi"] = "3";
+      resp["fr"] = orig_; resp["to"] = String("/") + CSE_ID;
+      String text; serializeJson(resp, text);
+      mqtt_.publish(notifyRespTopic_.c_str(), text.c_str());
+      if (msg["pc"]["m2m:sgn"]["vrq"] | false) return;
+      String con = msg["pc"]["m2m:sgn"]["nev"]["rep"]["m2m:cin"]["con"] | "";
+      // No nested MQTT calls while PubSubClient is in its callback.
+      if (con.length() && !pendingCommand_.length()) pendingCommand_ = con;
       return;
     }
-    int rsc = findInt(s, "\"rsc\":");
-    lastRsc_ = rsc;
-    // ACME pretty-prints ("rqi": "x"), so match the quoted rqi value itself (it is unique per request)
-    if (waitRqi_.length() && s.indexOf(String("\"") + waitRqi_ + "\"") >= 0) {
-      waitRsc_ = rsc;
-      return;
-    }
-    if (rsc >= 2000 && rsc < 3000) {
-      ok_++;
-    } else {
-      err_++;
-      Serial.printf("[oneM2M] error response: %s\n", s.substring(0, 200).c_str());
-    }
+    lastRsc_ = msg["rsc"] | 5000;
+    String rqi = msg["rqi"] | "";
+    if (waitRqi_.length() && rqi == waitRqi_) { waitRsc_ = lastRsc_; return; }
+    if (txWaiting_ && rqi == txRqi_) queueResponse(msg);
   }
 
   // Send one request and wait for its response code.
@@ -302,7 +440,7 @@ class AnchorNode {
     String base = String(CSE_NAME);
     String aePath = base + "/" + ae_;
     // Request-reachable with an MQTT point of access, so the CSE can push notifications to us.
-    String reach = String("\"rr\":") + (onCommand_ ? "true,\"poa\":[\"mqtt://" POA_BROKER ":" + String(MQTT_PORT) + "\"]"
+    String reach = String("\"lbl\":[\"anchor:hardware\",\"device:") + ae_ + "\"]," + String("\"rr\":") + ((onCommand_ || profileEnabled_) ? "true,\"poa\":[\"mqtt://" POA_BROKER ":" + String(MQTT_PORT) + "\"]"
                                                     : String("false"));
     int rsc = request(1, base, 2,
                       String("{\"m2m:ae\":{\"rn\":\"") + ae_ + "\",\"api\":\"" + api_ + "\"," + reach +
@@ -317,18 +455,22 @@ class AnchorNode {
       return false;
     }
     for (int i = 0; i < nCnt_; i++) {
-      rsc = request(1, aePath, 3, String("{\"m2m:cnt\":{\"rn\":\"") + cnts_[i] + "\"}}");
+      rsc = request(1, aePath, 3, String("{\"m2m:cnt\":{\"rn\":\"") + cnts_[i] + "\",\"lbl\":[\"anchor:sensor\",\"device:" + ae_ + "\",\"sensor:" + cnts_[i] + "\"]}}");
       Serial.printf("[oneM2M] CNT %s -> rsc=%d\n", cnts_[i], rsc);
       if (!okCreate(rsc)) return false;
     }
-    if (onCommand_) {
-      rsc = request(1, aePath, 3, "{\"m2m:cnt\":{\"rn\":\"command\",\"mni\":50}}");
+    if (onCommand_ || profileEnabled_) {
+      rsc = request(1, aePath, 3, "{\"m2m:cnt\":{\"rn\":\"command\"}}");
       Serial.printf("[oneM2M] CNT command -> rsc=%d\n", rsc);
       if (!okCreate(rsc)) return false;
       // net 3 = create of direct child resource; nu = this AE (delivered via its poa)
       rsc = request(1, aePath + "/command", 23,
                     String("{\"m2m:sub\":{\"rn\":\"sub-node\",\"nu\":[\"") + orig_ + "\"],\"enc\":{\"net\":[3]},\"nct\":1}}");
       Serial.printf("[oneM2M] SUB command/sub-node -> rsc=%d\n", rsc);
+      if (!okCreate(rsc)) return false;
+    }
+    if (profileEnabled_) {
+      rsc = request(1, aePath, 3, "{\"m2m:cnt\":{\"rn\":\"commandResults\"}}");
       if (!okCreate(rsc)) return false;
     }
     Serial.println("[oneM2M] registration done, streaming");

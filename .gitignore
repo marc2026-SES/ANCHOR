@@ -6,3 +6,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 .DS_Store
+hardware/firmware/libraries/AnchorNode/anchor_config.h
+**/ota.env
+**/queue.db*
+deploy/*.local.json
+deploy/cse/*.local.ini

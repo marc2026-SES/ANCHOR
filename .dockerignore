@@ -1,0 +1,14 @@
+.git
+.venv
+.runtime*
+docs
+*.pdf
+**/__pycache__
+hardware/firmware/libraries/AnchorNode/anchor_config.h
+**/ota.env
+**/queue.db*
+
+hardware
+tests
+build
+*.egg-info

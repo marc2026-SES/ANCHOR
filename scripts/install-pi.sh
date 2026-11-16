@@ -9,7 +9,7 @@ if [ "$(id -u)" = 0 ]; then
     echo 'Run as the normal Pi user, not root.' >&2
     exit 1
 fi
-for dependency in python3 git openssl ssh; do
+for dependency in python3 git; do
     command -v "$dependency" >/dev/null || { echo "Missing dependency: $dependency" >&2; exit 1; }
 done
 python3 -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ required"'
@@ -26,7 +26,6 @@ if [ -n "$(git -C "$acme_dir" status --porcelain)" ]; then
     exit 1
 fi
 python3 -m venv "$venv_dir"
-"$venv_dir/bin/python" -m pip install -e "$acme_dir" -e "$repo_root[dev-broker]"
-"$venv_dir/bin/python" -c 'from anchor.stack import postgres_binary; assert postgres_binary("postgres") and postgres_binary("initdb"), "Install PostgreSQL: sudo apt install postgresql"'
+"$venv_dir/bin/python" -m pip install -e "$acme_dir" -e "$repo_root[test]"
 printf '\nInstalled. Activate with: source "%s/bin/activate"\n' "$venv_dir"
-echo 'Then choose one role: anchor --role ship up OR anchor --role shore up'
+echo 'Configure deploy/<ship|edge|shore>.json and the matching CSE. See README migration steps.'

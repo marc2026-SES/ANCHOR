@@ -1,0 +1,26 @@
+# Linux coastal host. This packages an app and CSE; it is not a MEC platform installation.
+services:
+  edge-cse:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.cse
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - edge-cse-data:/var/lib/acme
+      - ./cse/edge.ini:/etc/anchor/edge.ini:ro
+  edge-app:
+    user: "${ANCHOR_UID:-1000}:${ANCHOR_GID:-1000}"
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.app
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - edge-cse
+    volumes:
+      - ./edge.container.json:/config/edge.json:ro
+      - ../.runtime-edge:/secrets:ro
+    command: ["--config", "/config/edge.json", "serve"]
+volumes:
+  edge-cse-data:

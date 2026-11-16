@@ -1,109 +1,71 @@
-from __future__ import annotations
-
 import argparse
 import json
-import time
-import uuid
+import os
+import secrets
+from pathlib import Path
 
 import requests
 
-from .client import Client, MQTTClient
-from .config import API_HOST, API_PORT, LOCAL_NODES, ROLE, RUNTIME, SENSORS, cert
-from .models import make_event, record_name
-
-
-def api(path, body=None):
-    with requests.Session() as session:
-        session.trust_env = False
-        headers = {"Authorization": "Bearer " + (RUNTIME / "api-token").read_text().strip()}
-        response = session.request("GET" if body is None else "POST", f"https://{API_HOST}:{API_PORT}{path}",
-                                   json=body, headers=headers, verify=cert(), timeout=90)
-        if response.status_code >= 400:
-            raise RuntimeError(f"API {response.status_code}: {response.text}")
-        return response.json()
-
-
-def emit(count=5, binding="mqtt", sensor="sensor-01", boot=None, start=0, priority="normal", temperature=20.0):
-    boot = boot or uuid.uuid4().hex[:12]
-    origin = "C" + sensor.replace("-", "")
-    client = MQTTClient("ship", origin) if binding == "mqtt" else Client("ship", origin)
-    events = []
-    try:
-        for seq in range(start, start + count):
-            event = make_event(sensor, boot, seq, temperature + seq / 10, priority)
-            body = {"m2m:cin": {"rn": record_name(event["eventId"]), "con": json.dumps(event), "cnf": "application/json:0"}}
-            client.create(f"ship/{sensor}/history", 4, body)
-            events.append(event)
-    finally:
-        if isinstance(client, MQTTClient):
-            client.close()
-    return events
+from .config import Settings
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="ANCHOR core. Select role: anchor --role ship|shore|dev COMMAND")
-    sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("up", "down", "prepare", "bootstrap", "status"):
+    parser = argparse.ArgumentParser(description='ANCHOR real hardware: ship / coastal edge / shore')
+    parser.add_argument('--config', required=True, help='deploy/ship.json, edge.json or shore.json')
+    sub = parser.add_subparsers(dest='command', required=True)
+    for name in ('serve', 'bootstrap', 'status', 'init-token'):
         sub.add_parser(name)
-    scenario = sub.add_parser("scenario")
-    scenario.add_argument("zone", choices=["coastal", "offshore", "shadow"])
-    emitter = sub.add_parser("emit")
-    emitter.add_argument("--count", type=int, default=5)
-    emitter.add_argument("--binding", choices=["mqtt", "http"], default="mqtt")
-    emitter.add_argument("--sensor", choices=SENSORS, default=SENSORS[0])
-    emitter.add_argument("--priority", choices=["normal", "critical"], default="normal")
-    emitter.add_argument("--temperature", type=float, default=20.0)
-    command = sub.add_parser("command")
-    command.add_argument("target", choices=["fan", "buzzer", "safetyGroup"])
-    command.add_argument("state", choices=["on", "off"])
-    command.add_argument("--ttl", type=float, default=60)
-    restart = sub.add_parser("restart")
-    restart.add_argument("node", choices=[*LOCAL_NODES, "service"])
-    trust = sub.add_parser("trust-shore", help="Trust the shore Pi's public certificate (ship only)")
-    trust.add_argument("certificate")
-    connect = sub.add_parser("connect", help="Start SSH forwards to the shore Pi (ship only)")
-    connect.add_argument("ssh_target", help="SSH alias or user@host with key authentication configured")
-    sub.add_parser("disconnect", help="Stop only the owned SSH tunnel")
-    sub.add_parser("info", help="Show role, owned processes and public certificate location")
+    command = sub.add_parser('command')
+    command.add_argument('--target', choices=('bridge', 'engine', 'reportingGroup'), default='reportingGroup')
+    command.add_argument('--interval-ms', type=int, default=200)
+    command.add_argument('--duration-ms', type=int, default=30000)
+    command.add_argument('--ttl-ms', type=int, default=60000)
+    command.add_argument('--id')
+    ack = sub.add_parser('ack')
+    ack.add_argument('incident_id')
+    ack.add_argument('--operator', required=True)
+    for name in ('capture-batch', 'batch-status'):
+        sub.add_parser(name).add_argument('batch_id')
     args = parser.parse_args(argv)
-    if ROLE == "shore" and args.command in ("emit", "scenario"):
-        parser.error(f"{args.command} belongs to the ship role")
-    if ROLE == "ship" and args.command == "command":
-        parser.error("Submit commands using anchor --role shore command on the shore Pi")
-    if args.command in ("up", "down", "prepare"):
-        from . import stack
-        getattr(stack, args.command)()
-        result = {"ok": True, "runtime": str(RUNTIME)}
-    elif args.command == "bootstrap":
-        result = api("/bootstrap", {})
-    elif args.command == "status":
-        result = api("/status")
-    elif args.command == "scenario":
-        result = api("/scenario", {"zone": args.zone})
-    elif args.command == "emit":
-        result = {"events": emit(args.count, args.binding, args.sensor, priority=args.priority, temperature=args.temperature)}
-    elif args.command == "command":
-        result = api("/commands", {"target": args.target, "desiredState": args.state == "on", "ttl": args.ttl})
-    elif args.command == "restart":
-        from . import stack
-        stack.stop_node(args.node)
-        if args.node == "service":
-            stack.start_service()
-        else:
-            stack.start_node(args.node)
-        result = {"restarted": args.node}
-    elif args.command in ("trust-shore", "connect", "disconnect", "info"):
-        from . import deployment
-        if args.command == "trust-shore":
-            result = deployment.trust_shore(args.certificate)
-        elif args.command == "connect":
-            result = deployment.connect(args.ssh_target)
-        elif args.command == "disconnect":
-            result = deployment.disconnect()
-        else:
-            result = deployment.info()
+    settings = Settings.load(args.config)
+    if args.command == 'serve':
+        from .service import serve
+        return serve(settings)
+    if args.command == 'bootstrap':
+        from .runtime import Runtime
+        result = Runtime(settings).provision()
+    elif args.command == 'init-token':
+        target = Path(settings.token_file)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(secrets.token_urlsafe(32) + '\n')
+        result = {'tokenFile': str(target)}
+    else:
+        path, body = '/status', None
+        if args.command == 'command':
+            path = '/commands'
+            body = {'target': args.target, 'intervalMs': args.interval_ms,
+                    'durationMs': args.duration_ms, 'ttlMs': args.ttl_ms}
+            if args.id:
+                body['commandId'] = args.id
+        elif args.command == 'ack':
+            path, body = '/incidents/ack', {'incidentId': args.incident_id, 'operator': args.operator}
+        elif args.command == 'capture-batch':
+            path, body = '/batches', {'batchId': args.batch_id}
+        elif args.command == 'batch-status':
+            from urllib.parse import quote
+            path = '/batches/' + quote(args.batch_id, safe='')
+        host = '127.0.0.1' if settings.bind == '0.0.0.0' else settings.bind
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.request('POST' if body is not None else 'GET', f'http://{host}:{settings.port}{path}',
+                                       json=body, timeout=15,
+                                       headers={'Authorization': 'Bearer ' + Path(settings.token_file).read_text().strip()})
+            response.raise_for_status()
+            result = response.json()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

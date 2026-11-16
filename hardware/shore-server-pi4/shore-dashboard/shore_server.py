@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ANCHOR shore control dashboard (runs on the shore Pi next to the IN-CSE). Stdlib only.
 
-Reads ONLY what has been replicated to the shore IN-CSE (cse-in/ship-gw/...), never the ship
+Reads ONLY what has been replicated to the shore IN-CSE (cse-in/anchor/events), never the ship
 directly, so a broken ship-shore link looks exactly like it does to a real shore operator:
 values freeze, then the buffered data arrives after the link returns and fills the gap.
 
@@ -27,8 +27,8 @@ from socketserver import ThreadingMixIn
 PORT = 8090
 NOTIFY_PORT = 8091
 CSE_HOST = ("127.0.0.1", 8080)
-GW = "/~/id-in/cse-in/ship-gw"
-ORIG = "CAdmin"  # the shore CSE keeps ACP checks on; the dashboard reads as the admin
+EVENTS_PATH = "/~/id-in/cse-in/anchor/events"
+ORIG = "CAnchorShore"  # provisioned by the integrated core; local operator view
 SHIP_CAMERA = os.environ.get("ANCHOR_SHIP_CAMERA", "http://10.251.196.250:8090/stream.mjpg")
 CONTAINERS = [
     "bridge/attitude", "bridge/position",
@@ -53,7 +53,9 @@ latest = {}                                     # container -> {"con", "ship_t",
 series = {k: deque() for k in SERIES}           # key -> [(ship_t, value, delayed)]
 events = deque(maxlen=60)                       # {"t", "kind", "text"}
 outages = deque(maxlen=20)                      # {"start", "end"|None}  (shore arrival time)
-NODE_SEQ = {n: deque(maxlen=6000) for n in ("bridge", "engine", "cargo")}  # (ship_t, seq) per ESP32
+NODE_SEQ = {n: deque(maxlen=6000) for n in ("bridge", "engine", "cargo")}  # (ship_t, bootId, seq)
+_seen = set()
+_seen_order = deque()
 link = {"last_arrival": None, "phase": "WAITING", "replayed": 0, "max_delay": 0.0, "cur_delay": None,
         "outage_replayed": 0}
 
@@ -123,7 +125,7 @@ def ingest(cnt, cin, live=True):
                     outages.append({"start": last, "end": now})
                 link["phase"] = "CATCHING_UP"
                 link["outage_replayed"] = 0
-                event("recover", f"선박 링크 복구 · 두절 {gap:.0f}초 · 선박에 보관된 데이터 수신 시작")
+                event("recover", f"육상 수신 재개 · 수신 공백 {gap:.0f}초 · 연안/선박 보관 데이터 도착")
             link["last_arrival"] = now
             link["cur_delay"] = delay
             if delayed:
@@ -132,14 +134,12 @@ def ingest(cnt, cin, live=True):
                 link["max_delay"] = max(link["max_delay"], delay)
             if link["phase"] == "CATCHING_UP" and delay < 5:
                 link["phase"] = "ONLINE"
-                missing = seq_gaps(outages[-1]) if outages else None
-                check = "" if missing is None else " · 순번 검증: 누락 없음" if missing == 0 else f" · 순번 검증: {missing}건 누락"
-                event("synced", f"동기화 완료 · 보관 데이터 {link['outage_replayed']}건 복구{check}")
+                event("synced", f"실시간 수신 재개 · 지연 수신 {link['outage_replayed']}건 · 최종 전달 검증은 core 관제에서 확인")
             elif link["phase"] == "WAITING":
                 link["phase"] = "CATCHING_UP" if delayed else "ONLINE"
         node = cnt.split("/")[0]
         if node in NODE_SEQ and isinstance(con.get("seq"), int):
-            NODE_SEQ[node].append((ship_t, con["seq"]))
+            NODE_SEQ[node].append((ship_t, con.get("bootId"), con["seq"]))
         prev = latest.get(cnt)
         if not prev or ship_t >= prev["ship_t"]:
             latest[cnt] = {"con": con, "ship_t": ship_t, "delay": delay}
@@ -160,18 +160,46 @@ def ingest(cnt, cin, live=True):
 
 
 def seq_gaps(outage):
-    """Count CINs that never reached shore around an outage. Each ESP32 numbers all of its CINs with
-    one running seq (shared by its containers), so within a node the received seqs must be contiguous.
-    Checked from 30 s before the outage to its end (ship time); None if there is too little data."""
+    """Observed gaps only, partitioned by MCU boot; not a completeness certificate."""
     lo, hi = (outage["start"] or 0) - 30, outage["end"] or time.time()
     missing, checked = 0, False
     for pts in NODE_SEQ.values():
-        seqs = sorted({s for t, s in pts if lo <= t <= hi})
-        if len(seqs) < 2:
-            continue
-        checked = True
-        missing += sum(b - a - 1 for a, b in zip(seqs, seqs[1:]) if 0 < b - a < 10000)  # ignore reboots (seq reset)
+        boots = {}
+        for t, boot, seq in pts:
+            if boot and not boot.startswith("legacy-") and lo <= t <= hi:
+                boots.setdefault(boot, set()).add(seq)
+        for values in boots.values():
+            seqs = sorted(values)
+            if len(seqs) > 1:
+                checked = True
+                missing += sum(b - a - 1 for a, b in zip(seqs, seqs[1:]))
     return missing if checked else None
+
+
+def ingest_envelope(cin, live=True):
+    """Adapt the immutable core envelope for the existing charts; never rewrite the CSE."""
+    try:
+        envelope = json.loads(cin["con"]) if isinstance(cin["con"], str) else cin["con"]
+        if envelope.get("kind") != "measurement":
+            return
+        eid = envelope["eventId"]
+        cnt = envelope["deviceId"] + "/" + envelope["sensor"]
+        if cnt not in CONTAINERS:
+            return
+        with lock:
+            if eid in _seen:
+                return
+            _seen.add(eid); _seen_order.append(eid)
+            if len(_seen_order) > 50000:
+                _seen.discard(_seen_order.popleft())
+        generated = envelope["generatedAt"]
+        arrive = parse_ct(cin["ct"])
+        con = {**envelope["payload"], "bootId": envelope["bootId"],
+               "ship_ct": datetime.fromtimestamp(generated, timezone.utc).strftime("%Y%m%dT%H%M%S,%f"),
+               "fwd_delay_s": max(0, arrive - generated)}
+        ingest(cnt, {**cin, "con": con}, live=live)
+    except (KeyError, TypeError, ValueError):
+        return
 
 
 def watchdog():
@@ -182,48 +210,36 @@ def watchdog():
             if last and link["phase"] != "OUTAGE" and time.time() - last > OUTAGE_GAP_S:
                 link["phase"] = "OUTAGE"
                 outages.append({"start": last, "end": None})
-                event("outage", "선박 통신 두절 · 선박은 자체 운용 중, 데이터는 선박에 보관됨")
+                event("outage", "육상 데이터 수신 중단 · 선박·연안의 현재 상태는 각 현장 관제에서 확인")
         time.sleep(1)
 
 
 def load_history():
-    cra = to_ct(time.time() - WINDOW_S)
-    n = 0
-    for cnt in CONTAINERS:
-        try:
-            s, body = cse("GET", f"{GW}/{cnt}?rcn=4&ty=4&cra={cra}&lim=2000", timeout=15)
-        except OSError:
-            continue
-        if s != 200:
-            continue
-        for cin in (body or {}).get("m2m:cnt", {}).get("m2m:cin", []):
-            ingest(cnt, cin, live=False)
-            n += 1
-    with lock:
-        for k in series:
-            series[k] = deque(sorted(series[k]))
-    log(f"history loaded: {n} CINs")
+    # The old chart window remains 15 minutes. The core's durable archive and batch
+    # receipts, not this bounded UI history, determine delivery completeness.
+    status, body = cse("GET", f"{EVENTS_PATH}?rcn=4&ty=4&cra={to_ct(time.time()-WINDOW_S)}&lim=5000", timeout=15)
+    if status != 200:
+        return
+    for cin in (body or {}).get("m2m:cnt", {}).get("m2m:cin", []):
+        ingest_envelope(cin, live=False)
 
 
-# ---------- subscriptions ----------
 def ensure_subs():
-    for cnt in CONTAINERS:
-        s, _ = cse("GET", f"{GW}/{cnt}/{SUB_RN}")
-        if s == 200:
-            continue
-        s, body = cse("POST", f"{GW}/{cnt}", {"m2m:sub": {
-            "rn": SUB_RN, "nu": [f"http://127.0.0.1:{NOTIFY_PORT}/notify/{cnt}"],
-            "enc": {"net": [3]}, "nct": 1}}, ty=23)
-        if s in (200, 201):
-            log(f"subscribed ship-gw/{cnt}")
+    status, _ = cse("GET", f"{EVENTS_PATH}/{SUB_RN}")
+    if status == 200:
+        return
+    cse("POST", EVENTS_PATH, {"m2m:sub": {
+        "rn": SUB_RN, "nu": [f"http://127.0.0.1:{NOTIFY_PORT}/notify/events"],
+        "enc": {"net": [3]}, "nct": 1}}, ty=23)
 
 
 def sub_maintenance():
-    while True:  # the containers appear when the first replicated CIN arrives; re-check every 30 s
+    while True:
         try:
             ensure_subs()
-        except OSError as e:
-            log("shore CSE unreachable:", e)
+            load_history()  # recover chart points after a lost notification
+        except (OSError, ValueError) as exc:
+            log("shore CSE:", exc)
         time.sleep(30)
 
 
@@ -238,8 +254,8 @@ class NotifyHandler(server.BaseHTTPRequestHandler):
             cin = json.loads(body).get("m2m:sgn", {}).get("nev", {}).get("rep", {}).get("m2m:cin")
         except (ValueError, AttributeError):
             cin = None
-        if cin and cnt in CONTAINERS:
-            ingest(cnt, cin)
+        if cin and cnt == "events":
+            ingest_envelope(cin)
         self.send_response(200)
         self.send_header("X-M2M-RSC", "2000")
         self.send_header("X-M2M-RI", self.headers.get("X-M2M-RI", ""))

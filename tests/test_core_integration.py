@@ -14,10 +14,10 @@ import uuid
 import pytest
 import requests
 
-from anchor.cli import api, emit
-from anchor.client import Client, OneM2MError, resource
-from anchor.config import ACME, RUNTIME
-from anchor.models import record_name
+from anchor.lab.cli import api, emit
+from anchor.lab.client import Client, OneM2MError, resource
+from anchor.lab.config import ACME, RUNTIME
+from anchor.lab.models import record_name
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get("ANCHOR_INTEGRATION") != "1", reason="opt-in local ACME acceptance test")]
@@ -153,7 +153,7 @@ def test_discovery_paginates_beyond_one_page():
 
 
 def test_real_shore_outage_keeps_local_safety_and_recovers():
-    from anchor.stack import start_node, stop_node
+    from anchor.lab.stack import start_node, stop_node
     route('offshore')
     stop_node('shore')
     try:

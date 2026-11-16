@@ -1,5 +1,7 @@
 # ANCHOR · Hardware part
 
+> 통합 실행은 [프로젝트 README](../README.md)를 따른다. 아래는 기존 하드웨어 구축 기록이다. 현재 동기화는 선박·연안·육상 core로 교체했으며, 구 FIFO 동기화기를 함께 실행하지 않는다.
+
 **A**daptive **N**etwork **C**ontinuity **H**ub for **O**cean **R**esilience. 팀 Ctrl+Sea, oneM2M Hackathon 2026.
 
 선박(RC 보트)의 센서 데이터를 선박 안의 oneM2M MN-CSE에 모으고, 육상 IN-CSE로 복제한다. 선박과 육상 사이 링크가 끊겨도 선박은 혼자 계속 돌고, 끊긴 동안 쌓인 데이터는 링크가 돌아오면 빠짐없이 육상으로 넘어간다. 이 폴더는 그 하드웨어 쪽 구현 전체다.

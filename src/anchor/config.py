@@ -1,72 +1,76 @@
+"""Explicit endpoints: the coastal CSE must never be reached through shore."""
 from __future__ import annotations
 
 import json
-import os
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
-PROJECT = Path(__file__).resolve().parents[2]
-ROLE = os.environ.get("ANCHOR_ROLE", "dev")
-if ROLE not in ("dev", "ship", "shore"):
-    raise ValueError("ANCHOR_ROLE must be dev, ship or shore")
-LOCAL_NODES = {"dev": ("shore", "edge", "ship"), "ship": ("ship",), "shore": ("shore", "edge")}[ROLE]
-RUNTIME = Path(os.environ.get("ANCHOR_RUNTIME", PROJECT / (".runtime" if ROLE == "dev" else f".runtime-{ROLE}"))).resolve()
-ACME = Path(os.environ.get("ANCHOR_ACME", PROJECT.parent / "ACME-oneM2M-CSE")).resolve()
-PIN = "283bd7d696090e983c07c149511102caab99642e"
-CORE = "CAnchorCore"
-DASHBOARD = "CAnchorDashboard"
-OWNER = "CAnchorOwner"
-COMMAND = "CShipCommand"
-SENSORS = tuple(f"sensor-{n:02}" for n in range(1, 5))
-ACTUATORS = ("fan", "buzzer")
-NODES = {
-    "shore": {"csi": "/id-shore", "rn": "shore", "port": 8700, "type": "IN"},
-    "edge": {"csi": "/id-edge", "rn": "edge", "port": 8701, "type": "MN"},
-    "ship": {"csi": "/id-ship", "rn": "ship", "port": 8702, "type": "MN"},
-}
-BROKER_PORT = 18883
-DB_PORT = 15433 if ROLE == "ship" else 15432
-API_PORT = 8791 if ROLE == "shore" else 8790
-# Peer CSEs remain loopback-only behind the ship's SSH forwards.
-if ROLE == "ship":
-    NODES["shore"]["port"] = 18700
-    NODES["edge"]["port"] = 18701
-TOPOLOGY = {}
-if os.environ.get("ANCHOR_TOPOLOGY"):
-    TOPOLOGY = json.loads(Path(os.environ["ANCHOR_TOPOLOGY"]).read_text())
-    for role, values in TOPOLOGY.get("nodes", {}).items():
-        if role not in NODES:
-            raise ValueError(f"Unknown CSE role: {role}")
-        NODES[role].update(values)
-API_HOST = TOPOLOGY.get("apiHost", "localhost")
-BIND_HOST = TOPOLOGY.get("bindHost", "127.0.0.1")
+ROLES = ("ship", "edge", "shore")
+ORIGINS = {role: "CAnchor" + role.title() for role in ROLES}
+DEVICES = {"bridge": "CBridge", "engine": "CEngine", "cargo": "CCargo"}
+SENSORS = {"bridge": ("attitude", "position"), "engine": ("vibration", "gas"),
+           "cargo": ("climate", "hatch")}
 
 
-def url(node: str) -> str:
-    return f"https://{NODES[node].get('host', 'localhost')}:{NODES[node]['port']}"
+@dataclass(frozen=True)
+class Endpoint:
+    url: str
+    root: str
+    csi: str
+    rvi: str = "3"
+    ca: str | bool = True
+    timeout: float = 3
+
+    def __post_init__(self):
+        if urlparse(self.url).scheme not in ("http", "https"):
+            raise ValueError("CSE URL must be http(s)")
+        if not self.root or "/" in self.root or not self.csi.startswith("/"):
+            raise ValueError("Invalid CSE root or ID")
+        if self.ca is False or not 0 < self.timeout <= 30:
+            raise ValueError("Certificate verification cannot be disabled; timeout must be 0..30")
 
 
-def cert() -> str:
-    bundle = RUNTIME / "certs" / "trust-bundle.pem"
-    return os.environ.get("ANCHOR_CA", str(bundle if bundle.exists() else RUNTIME / "certs" / "localhost.crt"))
+@dataclass
+class Settings:
+    role: str
+    nodes: dict[str, Endpoint]
+    vessel_id: str = "ship-001"
+    bind: str = "127.0.0.1"
+    port: int = 8790
+    notify_url: str = "http://127.0.0.1:8790/notify"
+    token_file: str = ""
+    scan_seconds: float = 2
+    max_records: int = 100000
+    max_bytes: int = 256000000
+    batch_size: int = 40
+    critical_burst: int = 4
+    direct_shore: bool = False
+    tilt: dict = field(default_factory=lambda: {"trigger": 25, "recover": 15, "holdSeconds": 2,
+                                                "recoverSeconds": 2, "maxGapSeconds": 4})
 
+    def __post_init__(self):
+        if self.role not in ROLES or self.role not in self.nodes:
+            raise ValueError("A local endpoint is required for ship, edge or shore")
+        if not self.vessel_id or ":" in self.vessel_id:
+            raise ValueError("vessel_id must be nonempty and contain no colon")
+        if not 0.2 <= self.scan_seconds <= 60 or min(self.max_records, self.max_bytes, self.batch_size, self.critical_burst) <= 0:
+            raise ValueError("Invalid scan interval or storage/batch limit")
+        if self.batch_size <= self.critical_burst:
+            raise ValueError("batch_size must leave a slot for ordinary traffic")
+        if not 0 <= self.tilt['recover'] < self.tilt['trigger'] <= 180:
+            raise ValueError("Tilt recovery threshold must be below trigger")
+        if min(self.tilt[k] for k in ('holdSeconds', 'recoverSeconds', 'maxGapSeconds')) <= 0:
+            raise ValueError("Tilt timing must be positive")
 
-def server_cert() -> str:
-    return str(RUNTIME / "certs" / "localhost.crt")
-
-
-def atomic_json(path: Path, value: object) -> None:
-    import tempfile
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
-        json.dump(value, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-        temp = Path(f.name)
-    os.replace(temp, path)
-
-
-def read_json(path: Path, default=None):
-    try:
-        return json.loads(path.read_text())
-    except FileNotFoundError:
-        return default
+    @classmethod
+    def load(cls, filename):
+        path = Path(filename).resolve()
+        data = json.loads(path.read_text())
+        data['nodes'] = {k: Endpoint(**v) for k, v in data['nodes'].items()}
+        if data.get('token_file') and not Path(data['token_file']).is_absolute():
+            data['token_file'] = str(path.parent / data['token_file'])
+        for endpoint in data['nodes'].values():
+            if isinstance(endpoint.ca, str) and not Path(endpoint.ca).is_absolute():
+                object.__setattr__(endpoint, 'ca', str(path.parent / endpoint.ca))
+        return cls(**data)
