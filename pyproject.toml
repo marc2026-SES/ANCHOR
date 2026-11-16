@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anchor-onem2m"
+version = "0.1.0"
+description = "Maritime oneM2M continuity demonstrator for ACME"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31", "paho-mqtt>=2.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+dev-broker = ["amqtt==0.12.1"]
+
+[project.scripts]
+anchor = "anchor.entrypoint:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires the local ACME stack"]
