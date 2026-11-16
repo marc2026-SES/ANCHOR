@@ -22,7 +22,7 @@ from socketserver import ThreadingMixIn
 
 PORT = 8090
 CSE = "http://127.0.0.1:8080/~/id-ship/cse-ship"
-HEADERS = {"X-M2M-Origin": "CAdmin", "X-M2M-RVI": "3", "Accept": "application/json"}
+HEADERS = {"X-M2M-Origin": "CAnchorShip", "X-M2M-RVI": "3", "Accept": "application/json"}
 CONTAINERS = [
     "bridge/attitude", "bridge/position",
     "engine/vibration", "engine/gas",

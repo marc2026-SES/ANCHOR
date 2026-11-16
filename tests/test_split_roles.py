@@ -12,7 +12,7 @@ import time
 import pytest
 import requests
 
-from anchor.config import PROJECT
+from anchor.lab.config import PROJECT
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('ANCHOR_SPLIT_INTEGRATION') != '1', reason='opt-in split-role test')]
@@ -28,7 +28,7 @@ def split(tmp_path_factory):
         env['ANCHOR_ROLE'] = role
         if role == 'ship':
             env['ANCHOR_TOPOLOGY'] = str(topology)
-        cmd = [sys.executable, '-c', script] if script else [sys.executable, '-m', 'anchor.entrypoint', '--role', role, *args]
+        cmd = [sys.executable, '-c', script] if script else [sys.executable, '-m', 'anchor.lab.entrypoint', '--role', role, *args]
         p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=120, cwd=PROJECT)
         if check and p.returncode:
             pytest.fail(f"Role {role}, command {args} failed: {p.stderr[-2000:]}")
@@ -72,12 +72,12 @@ def test_only_owned_processes_and_role_command_boundaries(split):
 def test_shore_queued_command_and_mqtt_delivery(split):
     run, queued = split
     def results():
-        return run('shore', script="from anchor.client import Client; import json; print(json.dumps([v for _,v in Client('shore').records('shore/anchor/commandResults')]))")
+        return run('shore', script="from anchor.lab.client import Client; import json; print(json.dumps([v for _,v in Client('shore').records('shore/anchor/commandResults')]))")
     wait_for(lambda: any(v['commandId'] == queued['commandId'] and v['status'] == 'executed' for v in results()))
     events = run('ship', 'emit', '--count', '5')['events']
     ids = {e['eventId'] for e in events}
     def received():
-        return set(run('shore', script="from anchor.client import Client; import json; print(json.dumps([v['eventId'] for _,v in Client('shore').records('shore/anchor/events')]))"))
+        return set(run('shore', script="from anchor.lab.client import Client; import json; print(json.dumps([v['eventId'] for _,v in Client('shore').records('shore/anchor/events')]))"))
     wait_for(lambda: ids.issubset(received()))
     before = run('ship', 'status')['pollingChannelReceived']
     run('shore', 'command', 'fan', 'off')
@@ -86,13 +86,13 @@ def test_shore_queued_command_and_mqtt_delivery(split):
 
 def test_shore_service_is_independent_of_ship_service(split):
     run, _ = split
-    run('ship', script="from anchor.stack import stop_node; import json; stop_node('service'); print(json.dumps({'stopped': True}))")
+    run('ship', script="from anchor.lab.stack import stop_node; import json; stop_node('service'); print(json.dumps({'stopped': True}))")
     try:
         assert run('shore', 'status')['state']['phase'] == 'READY'
         queued = run('shore', 'command', 'buzzer', 'off', '--ttl', '120')
     finally:
         run('ship', 'restart', 'service')
     def completed():
-        values = run('shore', script="from anchor.client import Client; import json; print(json.dumps([v for _,v in Client('shore').records('shore/anchor/commandResults')]))")
+        values = run('shore', script="from anchor.lab.client import Client; import json; print(json.dumps([v for _,v in Client('shore').records('shore/anchor/commandResults')]))")
         return any(v['commandId'] == queued['commandId'] and v['status'] == 'executed' for v in values)
     wait_for(completed)

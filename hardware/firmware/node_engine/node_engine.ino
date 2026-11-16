@@ -48,6 +48,7 @@ void setup() {
   analogSetPinAttenuation(PIN_MQ2, ADC_11db);
   node.addContainer("vibration");
   node.addContainer("gas");
+  node.enableReportProfile();
   node.begin();
 }
 
@@ -56,15 +57,23 @@ uint32_t tSample = 0, tGas = 0, tStat = 0;
 int n = 0;
 double sm = 0, sm2 = 0, sz = 0;
 float peak = 0;
+uint32_t activeWindowMs = 1000, windowStartedAt = 0;
 
 void loop() {
   node.loop();
   uint32_t now = millis();
+  uint32_t requestedWindow = node.reportIntervalMs();
+  if (requestedWindow != activeWindowMs) {
+    activeWindowMs = requestedWindow;
+    n = 0; sm = sm2 = sz = 0; peak = 0;
+    windowStartedAt = now;
+  }
 
   if (adxlOk && now - tSample >= 5) {
     tSample = now;
     float x, y, z;
     if (adxlRead(x, y, z)) {
+      if (!n) windowStartedAt = now;
       float m = sqrtf(x * x + y * y + z * z);
       sm += m;
       sm2 += (double)m * m;
@@ -72,12 +81,12 @@ void loop() {
       if (n > 0) peak = max(peak, fabsf(m - (float)(sm / (n + 1))));
       n++;
     }
-    if (n >= 200) {
+    if (n >= (int)(activeWindowMs / 5)) {
       double mean = sm / n;
       float rms = sqrt(max(0.0, sm2 / n - mean * mean));
-      char buf[160];
-      snprintf(buf, sizeof buf, "{\"vib_rms_g\":%.4f,\"vib_peak_g\":%.3f,\"mean_g\":%.3f,\"n\":%d,\"rssi\":%d}", rms, peak,
-               mean, n, node.rssi());
+      char buf[200];
+      snprintf(buf, sizeof buf, "{\"vib_rms_g\":%.4f,\"vib_peak_g\":%.3f,\"mean_g\":%.3f,\"n\":%d,\"rssi\":%d,\"reportIntervalMs\":%lu,\"sampleWindowMs\":%lu}", rms, peak,
+               mean, n, node.rssi(), (unsigned long)activeWindowMs, (unsigned long)(now - windowStartedAt));
       if (node.publish("vibration", buf)) Serial.printf("[TX] vibration %s\n", buf);
       n = 0;
       sm = sm2 = sz = 0;

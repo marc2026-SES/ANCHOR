@@ -1,0 +1,17 @@
+[Unit]
+Description=ANCHOR %i real hardware core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/opt/anchor
+ExecStart=/opt/anchor/.venv/bin/anchor --config /opt/anchor/deploy/%i.json serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=35
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

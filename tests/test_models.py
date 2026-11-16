@@ -1,6 +1,6 @@
 import pytest
 
-from anchor.models import RoutePolicy, make_event, reconcile, validate_event
+from anchor.lab.models import RoutePolicy, make_event, reconcile, validate_event
 
 
 def test_ack_after_gap_does_not_advance_checkpoint():

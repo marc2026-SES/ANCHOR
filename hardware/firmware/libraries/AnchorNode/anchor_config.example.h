@@ -18,3 +18,8 @@
 // The nodes find the ship Pi by mDNS name first and use CSE_HOST only as a fallback
 // (a phone hotspot can hand the Pi's address to another device). Default: "piking".
 // #define CSE_MDNS "piking"
+
+// Must match deploy/ship.json. Queue limits pause new writes rather than evict old CINs.
+#define VESSEL_ID "ship-001"
+#define ANCHOR_RAW_MAX_RECORDS 20000
+#define ANCHOR_RAW_MAX_BYTES 5000000

@@ -1,0 +1,34 @@
+{
+  "role": "ship",
+  "vessel_id": "ship-001",
+  "bind": "0.0.0.0",
+  "port": 8790,
+  "notify_url": "http://127.0.0.1:8790/notify",
+  "token_file": "../.runtime-ship/api-token",
+  "direct_shore": false,
+  "scan_seconds": 2,
+  "batch_size": 40,
+  "nodes": {
+    "ship": {
+      "url": "http://127.0.0.1:8080",
+      "root": "cse-ship",
+      "csi": "/id-ship",
+      "rvi": "3",
+      "timeout": 3
+    },
+    "edge": {
+      "url": "http://edge.local:8080",
+      "root": "cse-edge",
+      "csi": "/id-edge",
+      "rvi": "3",
+      "timeout": 3
+    },
+    "shore": {
+      "url": "http://shore.local:8080",
+      "root": "cse-in",
+      "csi": "/id-in",
+      "rvi": "3",
+      "timeout": 3
+    }
+  }
+}

@@ -97,6 +97,8 @@
 </style>
 </head>
 <body>
+<div style="padding:8px 16px;background:#17212e;color:#fff">통합 관제: <a id="anchor-core-link" style="color:#9cd8ff" href="#">사건 · 연안 보관 · 최종 전달 · 실제 장치 명령</a></div>
+<script>document.getElementById("anchor-core-link").href=location.protocol+"//"+location.hostname+":8790/";</script>
 <header>
   <h1>⚓ ANCHOR</h1>
   <span class="sub">육상 관제 · Shore IN-CSE cse-in</span>
@@ -177,9 +179,9 @@ let S = null;     // last /api/state
 const nodeLevel = { bridge: "bad", engine: "bad", cargo: "bad" };
 const PHASE = {
   WAITING: ["연결 대기", "선박 데이터를 기다리는 중"],
-  ONLINE: ["선박 링크 정상", "선박 MN-CSE의 데이터가 실시간으로 육상 IN-CSE에 복제되고 있습니다"],
-  OUTAGE: ["선박 통신 두절", "선박은 자체 운용 중 · 센서 데이터는 선박 게이트웨이에 보관되고 있습니다"],
-  CATCHING_UP: ["링크 복구 · 보관 데이터 동기화 중", "두절 동안 선박에 쌓인 데이터를 순서대로 받고 있습니다"],
+  ONLINE: ["최근 데이터 수신 중", "육상 CSE에 도착한 센서 기록입니다 · 각 연결 상태와 최종 확인은 통합 관제에서 확인"],
+  OUTAGE: ["육상 수신 중단", "새 기록이 도착하지 않고 있습니다 · 선박·연안의 현재 운용 상태는 각 현장 관제에서 확인"],
+  CATCHING_UP: ["보관 데이터 수신 중", "선박 또는 연안에 보관된 기록을 받고 있습니다 · 최종 완료는 고정 배치로 대조"],
 };
 const fmtS = s => s == null ? "-" : s < 60 ? `${s.toFixed(0)}초` : `${Math.floor(s / 60)}분 ${Math.round(s % 60)}초`;
 const hhmmss = t => new Date(t * 1000).toLocaleTimeString("ko-KR", { hour12: false });

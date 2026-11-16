@@ -169,12 +169,14 @@ void setup() {
       Serial.println("[ZERO] cleared");
     }
   });
+  node.enableReportProfile();
   node.begin();
 }
 
 uint32_t tAtt = 0, tPos = 0, tStat = 0, tLive = 0, tFiltUs = 0;
 float fRoll = 0, fPitch = 0, lastA[3] = {0, 0, 1}, lastG[3] = {0, 0, 0};
 bool filtInit = false;
+uint32_t lastImuReadMs = 0;
 
 void loop() {
   node.loop();
@@ -194,6 +196,7 @@ void loop() {
     float dt = tFiltUs ? (nowUs - tFiltUs) / 1e6f : 0;
     tFiltUs = nowUs;
     if (mpuRead(lastA, lastG)) {
+      lastImuReadMs = millis();
       for (int k = 0; k < 3; k++) lastG[k] -= gb[k];
       float ar, ap;
       rawAttitude(lastA, ar, ap);
@@ -218,13 +221,13 @@ void loop() {
   }
 
   // 1 Hz oneM2M record
-  if (filtInit && now - tAtt >= 1000) {
+  if (filtInit && now - tAtt >= node.reportIntervalMs()) {
     tAtt = now;
-    char buf[240];
+    char buf[320];
     snprintf(buf, sizeof buf,
-             "{\"roll\":%.1f,\"pitch\":%.1f,\"gx\":%.1f,\"gy\":%.1f,\"gz\":%.1f,\"ax\":%.2f,\"ay\":%.2f,\"az\":%.2f,\"roll0\":%.2f,\"pitch0\":%.2f,\"rssi\":%d}",
+             "{\"roll\":%.1f,\"pitch\":%.1f,\"gx\":%.1f,\"gy\":%.1f,\"gz\":%.1f,\"ax\":%.2f,\"ay\":%.2f,\"az\":%.2f,\"roll0\":%.2f,\"pitch0\":%.2f,\"rssi\":%d,\"reportIntervalMs\":%lu,\"ok\":%s}",
              fRoll - roll0, fPitch - pitch0, lastG[0], lastG[1], lastG[2], lastA[0], lastA[1], lastA[2], roll0, pitch0,
-             node.rssi());
+             node.rssi(), (unsigned long)node.reportIntervalMs(), millis() - lastImuReadMs <= 100 ? "true" : "false");
     if (node.publish("attitude", buf)) Serial.printf("[TX] attitude %s\n", buf);
   }
 

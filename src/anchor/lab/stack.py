@@ -185,7 +185,7 @@ def up():
         if usable:
             spawn("broker", [broker, "-c", str(RUNTIME / "broker" / "mosquitto.conf")])
         else:
-            spawn("broker", [sys.executable, "-m", "anchor.broker"])
+            spawn("broker", [sys.executable, "-m", "anchor.lab.broker"])
         time.sleep(0.3)
     for name in LOCAL_NODES:
         start_node(name)
@@ -194,7 +194,7 @@ def up():
 
 def start_service():
     from .cli import api
-    spawn("service", [sys.executable, "-m", "anchor.service"], cwd=str(PROJECT))
+    spawn("service", [sys.executable, "-m", "anchor.lab.service"], cwd=str(PROJECT))
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
@@ -232,7 +232,7 @@ def stop_node(name):
     if alive(pid):
         # Refuse to signal an unrelated process if a stale PID has been reused.
         cmd = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True).strip()
-        expected = ("ssh",) if name == "tunnel" else ("anchor.service",) if name == "service" else ("postgres",) if name == "database" else ("mosquitto", "anchor.broker") if name == "broker" else ("acmecse",)
+        expected = ("ssh",) if name == "tunnel" else ("anchor.lab.service",) if name == "service" else ("postgres",) if name == "database" else ("mosquitto", "anchor.lab.broker") if name == "broker" else ("acmecse",)
         if not any(part in cmd for part in expected) or (name in NODES and str(RUNTIME / name) not in cmd):
             raise RuntimeError(f"PID {pid} no longer belongs to {name}; refusing to stop it")
         os.kill(pid, signal.SIGTERM)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anchor-onem2m"
-version = "0.1.0"
+version = "0.2.0"
 description = "Maritime oneM2M continuity demonstrator for ACME"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31", "paho-mqtt>=2.0"]
@@ -15,6 +15,10 @@ dev-broker = ["amqtt==0.12.1"]
 
 [project.scripts]
 anchor = "anchor.entrypoint:main"
+anchor-lab = "anchor.lab.entrypoint:main"
+
+[tool.setuptools.package-data]
+anchor = ["dashboard.html"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

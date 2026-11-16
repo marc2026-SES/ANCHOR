@@ -1,172 +1,117 @@
-from __future__ import annotations
-
+"""Same operator view on ship, coastal MEC app and shore; device UI is retained."""
 import hmac
 import json
-import math
 import signal
-import ssl
 import threading
 import time
-import uuid
-from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote
 
-from .client import Client, OneM2MError, resource
-from .config import API_PORT, BIND_HOST, ROLE, RUNTIME, atomic_json, read_json, server_cert
-from .engine import Engine
-from .models import record_name
-from .resources import bootstrap, latest, write_state
+from .runtime import Runtime
 
 
-class ShoreState:
-    """Shore can accept commands with the ship powered off or unreachable."""
-    def __init__(self):
-        self.bootstrapped = False
-        self.done = threading.Event()
-        self.wake = threading.Event()
-        self.errors = deque(maxlen=32)
-
-    def status(self):
-        return {"role": "shore", "state": {"phase": "READY" if self.bootstrapped else "STARTING"},
-                "metrics": latest(Client("shore"), "shore/anchor/deliveryMetrics", {}),
-                "metricsSource": "last report received from ship; inspect updatedAt for freshness",
-                "errors": list(self.errors)}
-
-
-def serve():
-    engine = ShoreState() if ROLE == "shore" else Engine()
-    token = (RUNTIME / "api-token").read_text().strip()
-
+def make_server(runtime, token):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
-        def send(self, code, data):
-            payload = json.dumps(data).encode()
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("X-M2M-RSC", "2000" if code < 300 else "4000")
-            self.send_header("X-M2M-RI", self.headers.get("X-M2M-RI", ""))
+        def send(self, status, value, content_type='application/json; charset=utf-8'):
+            payload = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(payload)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('X-M2M-RSC', '2000' if status < 300 else '4000')
+            self.send_header('X-M2M-RI', self.headers.get('X-M2M-RI', ''))
             self.end_headers()
             self.wfile.write(payload)
 
+        def authorized(self):
+            return hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + token)
+
         def do_GET(self):
-            if self.path != "/health" and not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
-                return self.send(401, {"error": "Invalid API token"})
-            if self.path == "/health":
-                self.send(200, {"ok": True, "role": ROLE, "bootstrapped": engine.bootstrapped})
-            elif self.path == "/status":
-                self.send(200, {"role": ROLE, **engine.status()})
-            else:
-                self.send(404, {"error": "Not found"})
+            if self.path == '/':
+                return self.send(200, Path(__file__).with_name('dashboard.html').read_bytes(), 'text/html; charset=utf-8')
+            if self.path == '/health':
+                fresh = bool(runtime.last_scan and time.time() - runtime.last_scan < max(15, runtime.settings.scan_seconds * 3))
+                ready = runtime.ready and fresh
+                return self.send(200 if ready else 503, {'ready': ready, 'role': runtime.role})
+            if not self.authorized():
+                return self.send(401, {'error': 'API token required'})
+            try:
+                if self.path == '/status':
+                    return self.send(200, runtime.status())
+                if self.path.startswith('/batches/'):
+                    return self.send(200, runtime.batch_status(unquote(self.path[len('/batches/'):])) )
+                self.send(404, {'error': 'Not found'})
+            except ValueError as exc:
+                self.send(400, {'error': str(exc)})
+            except Exception as exc:
+                self.send(503, {'error': str(exc)})
 
         def do_POST(self):
-            if self.path != "/notify/telemetry" and not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
-                return self.send(401, {"error": "Invalid API token"})
+            if self.path != '/notify' and not self.authorized():
+                return self.send(401, {'error': 'API token required'})
             try:
-                size = int(self.headers.get("Content-Length", "0"))
-                if not 0 < size <= 1_048_576:
-                    return self.send(413, {"error": "Invalid body size"})
+                size = int(self.headers.get('Content-Length', 0))
+                if not 0 < size <= 65536:
+                    return self.send(413, {'error': 'Invalid body size'})
                 body = json.loads(self.rfile.read(size))
                 if not isinstance(body, dict):
-                    raise ValueError("Expected a JSON object")
-                if ROLE == "shore" and self.path in ("/notify/telemetry", "/scenario"):
-                    return self.send(405, {"error": "This endpoint belongs to the ship role"})
-                if ROLE == "ship" and self.path == "/commands":
-                    return self.send(405, {"error": "Submit commands on the shore Pi"})
-                if self.path == "/notify/telemetry":
-                    # CSE notification verification is acknowledged without mutating state.
-                    if not body.get("m2m:sgn", {}).get("vrq"):
-                        engine.notify(body)
+                    raise ValueError('Expected object')
+                if self.path == '/notify':
+                    # Never ingest notification bodies as authoritative measurements.
+                    if not body.get('m2m:sgn', {}).get('vrq'):
+                        with runtime.lock:
+                            runtime.notifications += 1
+                        runtime.wake.set()
                     return self.send(200, {})
-                if self.path == "/bootstrap":
-                    data = bootstrap()
-                    engine.bootstrapped = True
-                    engine.wake.set()
-                    return self.send(200, data)
-                if self.path == "/scenario":
-                    if body.get("zone") not in ("coastal", "offshore", "shadow"):
-                        raise ValueError("zone must be coastal, offshore or shadow")
-                    atomic_json(RUNTIME / "scenario.json", body)
-                    return self.send(200, {"mode": "local-link-simulator", **body})
-                if self.path == "/commands":
-                    if body.get("target") not in ("fan", "buzzer", "safetyGroup") or type(body.get("desiredState")) is not bool:
-                        raise ValueError("Invalid target or desiredState")
-                    ttl = float(body.get("ttl", 60))
-                    if not math.isfinite(ttl) or not 0 < ttl <= 3600:
-                        raise ValueError("ttl must be in (0, 3600]")
-                    command_id = body.get("commandId", uuid.uuid4().hex)
-                    if not isinstance(command_id, str) or not 1 <= len(command_id) <= 128:
-                        raise ValueError("commandId must be a string of 1..128 characters")
-                    try:
-                        existing = json.loads(resource(Client("shore").get(
-                            "shore/anchor/commands/" + record_name(command_id)))["con"])
-                    except OneM2MError as exc:
-                        if exc.rsc != 4004:
-                            raise
-                    else:
-                        if any(existing[k] != body[k] for k in ("target", "desiredState")):
-                            return self.send(409, {"error": "commandId already has a different payload"})
-                        return self.send(200, existing)
-                    command = {"commandId": command_id, "target": body["target"],
-                               "desiredState": body["desiredState"], "issuedAt": time.time(), "expiresAt": time.time() + ttl}
-                    Client("shore").put_record("shore/anchor/commands", record_name(command["commandId"]), command)
-                    def hint():
-                        try:
-                            Client("shore", timeout=7).notify("shore/shipCommands", {"m2m:sgn": {
-                                "sur": "/id-shore/shore/anchor/commands",
-                                "nev": {"net": 3, "rep": {"m2m:cin": {"con": json.dumps(command)}}}}})
-                        except Exception as exc:
-                            # Failure is observable; the persistent command ledger remains authoritative.
-                            engine.errors.append({"at": time.time(), "error": f"PCH hint: {exc}"})
-                    threading.Thread(target=hint, daemon=True).start()
-                    return self.send(201, command)
-                self.send(404, {"error": "Not found"})
-            except (ValueError, KeyError) as exc:
-                self.send(400, {"error": str(exc)})
+                if self.path == '/commands':
+                    if runtime.role != 'shore':
+                        return self.send(405, {'error': 'Commands are issued at shore'})
+                    return self.send(201, runtime.submit_command(body))
+                if self.path == '/incidents/ack':
+                    return self.send(200, runtime.acknowledge(body['incidentId'], body['operator']))
+                if self.path == '/batches':
+                    name = body['batchId']
+                    if not isinstance(name, str) or not 1 <= len(name) <= 80:
+                        raise ValueError('Invalid batchId')
+                    return self.send(201, runtime.capture_batch(name))
+                self.send(404, {'error': 'Not found'})
+            except (ValueError, KeyError, TypeError) as exc:
+                self.send(400, {'error': str(exc)})
             except Exception as exc:
-                self.send(502, {"error": str(exc)})
+                self.send(503, {'error': str(exc)})
 
-    def simulate_link():
-        while not engine.done.wait(2):
-            if not engine.bootstrapped:
-                continue
-            scenario = read_json(RUNTIME / "scenario.json", {})
-            if not scenario or scenario.get("enabled") is False:
-                continue
-            zone = scenario["zone"]
-            state = {"zone": zone, "coastalAvailable": zone == "coastal", "satelliteAvailable": zone != "shadow",
-                     "rssi": scenario.get("rssi", -70 if zone == "coastal" else -120), "observedAt": time.time(),
-                     "source": "local-link-simulator", "scenarioId": scenario.get("scenarioId", "manual")}
+    return ThreadingHTTPServer((runtime.settings.bind, runtime.settings.port), Handler)
+
+
+def serve(settings):
+    token = Path(settings.token_file).read_text().strip()
+    if len(token) < 24:
+        raise ValueError('Generate a token with anchor --config ... init-token first')
+    runtime = Runtime(settings)
+    httpd = make_server(runtime, token)
+    def ready_loop():
+        while not runtime.done.is_set():
             try:
-                # Core-only link fixture; no MEC APIs or IPE are involved.
-                write_state(Client("ship"), "ship/anchor/linkState", state)
+                runtime.local.get(runtime.journal.path('events'))
+                runtime.ready = True
+                return
             except Exception as exc:
-                engine.errors.append({"at": time.time(), "error": f"Link simulator: {exc}"})
-
-    httpd = ThreadingHTTPServer((BIND_HOST, API_PORT), Handler)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(server_cert(), str(RUNTIME / "certs" / "localhost.key"))
-    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-    for target in (() if ROLE == "shore" else (engine.run, engine.commands, engine.poll_loop, simulate_link)):
-        threading.Thread(target=target, daemon=True).start()
-    # Restart automatically resumes against persisted CSE resources without recreating them.
-    try:
-        node = "shore" if ROLE == "shore" else "ship"
-        Client(node).get(f"{node}/anchor/commands")
-        engine.bootstrapped = True
-    except Exception:
-        pass
-
+                runtime.error('startup: run bootstrap if resources are missing', exc)
+                runtime.done.wait(3)
+    threading.Thread(target=ready_loop, daemon=True).start()
+    runtime.start()
     def stop(*_):
-        engine.done.set()
+        runtime.done.set()
         threading.Thread(target=httpd.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    httpd.serve_forever(poll_interval=0.2)
-    httpd.server_close()
-
-
-if __name__ == "__main__":
-    serve()
+    try:
+        httpd.serve_forever(poll_interval=0.2)
+    finally:
+        runtime.stop()
+        httpd.server_close()

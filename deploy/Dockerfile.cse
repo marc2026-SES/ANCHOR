@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+ARG ACME_REV=283bd7d696090e983c07c149511102caab99642e
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    pip install --no-cache-dir "git+https://github.com/ankraft/ACME-oneM2M-CSE.git@${ACME_REV}" && \
+    apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
+    useradd --uid 10001 --create-home anchor && mkdir -p /var/lib/acme && chown anchor /var/lib/acme
+COPY deploy/cse/edge.ini /etc/anchor/edge.ini
+WORKDIR /var/lib/acme
+USER 10001
+ENTRYPOINT ["sh", "-c", "cp /etc/anchor/edge.ini /var/lib/acme/acme.ini && exec python -m acmecse --headless --base-directory /var/lib/acme --config acme.ini"]
