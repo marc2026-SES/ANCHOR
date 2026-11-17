@@ -3,25 +3,30 @@
   "vessel_id": "ship-001",
   "bind": "0.0.0.0",
   "port": 8790,
-  "notify_url": "http://127.0.0.1:8790/notify",
+  "notify_url": "https://127.0.0.1:8790/notify",
   "token_file": "/secrets/api-token",
   "direct_shore": false,
   "scan_seconds": 2,
   "batch_size": 40,
   "nodes": {
     "edge": {
-      "url": "http://127.0.0.1:8080",
+      "url": "https://127.0.0.1:8080",
       "root": "cse-edge",
       "csi": "/id-edge",
       "rvi": "3",
-      "timeout": 3
+      "timeout": 3,
+      "ca": "/secrets/tls/ca.crt"
     },
     "shore": {
-      "url": "http://shore.local:8080",
+      "url": "https://shore.local:8080",
       "root": "cse-in",
       "csi": "/id-in",
       "rvi": "3",
-      "timeout": 3
+      "timeout": 3,
+      "ca": "/secrets/tls/ca.crt"
     }
-  }
+  },
+  "tls_ca": "/secrets/tls/ca.crt",
+  "tls_cert": "/secrets/tls/server.crt",
+  "tls_key": "/secrets/tls/server.key"
 }

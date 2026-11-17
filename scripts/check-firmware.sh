@@ -8,6 +8,7 @@ test -f "$firmware_dir/libraries/AnchorNode/anchor_config.h" || { echo 'Copy anc
 build_dir="$(mktemp -d /tmp/anchor-firmware.XXXXXX)"
 trap 'rm -rf -- "$build_dir"' EXIT
 for board in bridge engine cargo; do
+  test -f "$firmware_dir/libraries/AnchorNode/anchor_${board}_tls.h" || { echo "Missing TLS header for $board. Run scripts/provision-tls.py first." >&2; exit 1; }
   case "$board" in
     bridge) fqbn='esp32:esp32:esp32s3' ;;
     engine) fqbn='esp32:esp32:esp32' ;;

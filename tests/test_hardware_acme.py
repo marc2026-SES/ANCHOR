@@ -5,6 +5,7 @@ ANCHOR_HARDWARE_INTEGRATION=1 pytest tests/test_hardware_acme.py -v
 import copy
 import json
 import os
+import runpy
 import socket
 import subprocess
 import sys
@@ -37,12 +38,15 @@ def fleet(tmp_path_factory):
     base = tmp_path_factory.mktemp('hardware-acme')
     nodes, processes, runtimes, servers = {}, {}, {}, []
     configs = {}
+    issuer = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'scripts/provision-tls.py'))
+    pki = issuer['provision'](base / 'pki', {})
     def start(role):
         directory = base / role
         with (directory / 'process.log').open('a') as log:
-            process = subprocess.Popen([sys.executable, '-m', 'acmecse', '--headless',
+            process = subprocess.Popen([sys.executable, '-m', 'anchor.acme_tls', '--headless',
                                         '--base-directory', str(directory), '--config', 'acme.ini'],
-                                       cwd=directory, stdout=log, stderr=subprocess.STDOUT)
+                                       cwd=directory, stdout=log, stderr=subprocess.STDOUT,
+                                       env={**os.environ, 'ANCHOR_TLS_DIR': str(pki / role)})
         processes[role] = process
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -58,7 +62,7 @@ def fleet(tmp_path_factory):
         for role, root, csi in [('ship', 'cse-ship', '/id-ship'), ('edge', 'cse-edge', '/id-edge'), ('shore', 'cse-in', '/id-in')]:
             directory = base / role; directory.mkdir()
             p = port()
-            nodes[role] = Endpoint(f'http://127.0.0.1:{p}', root, csi, timeout=2)
+            nodes[role] = Endpoint(f'https://127.0.0.1:{p}', root, csi, ca=str(pki / role / 'ca.crt'), timeout=2)
             (directory / 'acme.ini').write_text(f'''[basic.config]
 cseType={'IN' if role == 'shore' else 'MN'}
 cseID={csi[1:]}
@@ -77,6 +81,11 @@ enableLimits=false
 [database.tinydb]
 cacheSize=0
 writeDelay=0
+[http.security]
+useTLS=true
+verifyCertificate=true
+caCertificateFile={pki / role / "server.crt"}
+caPrivateKeyFile={pki / role / "server.key"}
 [mqtt]
 enable=false
 [logging]
@@ -89,8 +98,9 @@ enable=false
 ''')
             start(role)
         for role in nodes:
-            cfg = Settings(role, nodes, port=port())
-            cfg.notify_url = f'http://127.0.0.1:{cfg.port}/notify'
+            cfg = Settings(role, nodes, port=port(), tls_cert=str(pki / role / 'server.crt'),
+                           tls_key=str(pki / role / 'server.key'), tls_ca=str(pki / role / 'ca.crt'))
+            cfg.notify_url = f'https://127.0.0.1:{cfg.port}/notify'
             configs[role] = cfg
             runtime = Runtime(cfg)
             server = make_server(runtime, 'test-token-with-at-least-24-characters')

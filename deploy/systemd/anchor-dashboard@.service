@@ -1,12 +1,13 @@
 [Unit]
-Description=ANCHOR %i real hardware core
-After=network-online.target
+Description=ANCHOR %i dashboard
+After=network-online.target time-sync.target anchor-cse@%i.service
 Wants=network-online.target
+ConditionPathExists=/opt/anchor/deploy/%i/run.sh
 
 [Service]
 User=pi
 WorkingDirectory=/opt/anchor
-ExecStart=/opt/anchor/.venv/bin/anchor --config /opt/anchor/deploy/%i.json serve
+ExecStart=/opt/anchor/deploy/%i/run.sh dashboard
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=35

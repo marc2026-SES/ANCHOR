@@ -5,9 +5,9 @@ Reads ONLY what has been replicated to the shore IN-CSE (cse-in/anchor/events), 
 directly, so a broken ship-shore link looks exactly like it does to a real shore operator:
 values freeze, then the buffered data arrives after the link returns and fills the gap.
 
-  http://<pi4>:8090/            dashboard page
-  http://<pi4>:8090/api/state   JSON: link judgement, latest values, 10-min series, events
-  http://<pi4>:8090/stream.mjpg ship camera, relayed from the ship Pi (freezes when the link drops)
+  https://<pi4>:8090/            dashboard page
+  https://<pi4>:8090/api/state   JSON: link judgement, latest values, 10-min series, events
+  https://<pi4>:8090/stream.mjpg ship camera, relayed from the ship Pi (freezes when the link drops)
 
 Every replicated CIN reaches us through a oneM2M subscription (HTTP notification to this process),
 so the backfill burst after an outage is captured CIN by CIN, not sampled.
@@ -23,13 +23,17 @@ from datetime import datetime, timezone
 from http import server
 from pathlib import Path
 from socketserver import ThreadingMixIn
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+from anchor.tls import host_tls_files, open_https, client_context, secure_server, require_https
+CA, CERT, KEY = host_tls_files()
 
 PORT = 8090
 NOTIFY_PORT = 8091
 CSE_HOST = ("127.0.0.1", 8080)
 EVENTS_PATH = "/~/id-in/cse-in/anchor/events"
 ORIG = "CAnchorShore"  # provisioned by the integrated core; local operator view
-SHIP_CAMERA = os.environ.get("ANCHOR_SHIP_CAMERA", "http://10.251.196.250:8090/stream.mjpg")
+SHIP_CAMERA = os.environ.get("ANCHOR_SHIP_CAMERA", "https://ship.local:8090/stream.mjpg")
 CONTAINERS = [
     "bridge/attitude", "bridge/position",
     "engine/vibration", "engine/gas",
@@ -90,7 +94,7 @@ def cse(method, path, body=None, ty=None, timeout=5):
     if body is not None:
         data = json.dumps(body).encode()
         h["Content-Type"] = f"application/json;ty={ty}"
-    c = http.client.HTTPConnection(*CSE_HOST, timeout=timeout)
+    c = http.client.HTTPSConnection(*CSE_HOST, timeout=timeout, context=client_context(CA))
     try:
         c.request(method, path, body=data, headers=h)
         r = c.getresponse()
@@ -225,11 +229,14 @@ def load_history():
 
 
 def ensure_subs():
-    status, _ = cse("GET", f"{EVENTS_PATH}/{SUB_RN}")
+    status, body = cse("GET", f"{EVENTS_PATH}/{SUB_RN}")
+    expected = [f"https://127.0.0.1:{NOTIFY_PORT}/notify/events"]
     if status == 200:
+        if body.get("m2m:sub", {}).get("nu") != expected:
+            cse("PUT", f"{EVENTS_PATH}/{SUB_RN}", {"m2m:sub": {"nu": expected}})
         return
     cse("POST", EVENTS_PATH, {"m2m:sub": {
-        "rn": SUB_RN, "nu": [f"http://127.0.0.1:{NOTIFY_PORT}/notify/events"],
+        "rn": SUB_RN, "nu": [f"https://127.0.0.1:{NOTIFY_PORT}/notify/events"],
         "enc": {"net": [3]}, "nct": 1}}, ty=23)
 
 
@@ -312,7 +319,7 @@ class Handler(server.BaseHTTPRequestHandler):
     def relay_camera(self):
         """Pass the ship camera through the shore Pi: it rides the same ship-shore link."""
         try:
-            up = urllib.request.urlopen(SHIP_CAMERA, timeout=4)
+            up = open_https(SHIP_CAMERA, ca=CA, timeout=4)
         except OSError as e:
             self.body(503, "text/plain", f"ship camera unreachable: {e}".encode())
             return
@@ -338,7 +345,8 @@ class ThreadingServer(ThreadingMixIn, server.HTTPServer):
 
 
 if __name__ == "__main__":
-    notify = ThreadingServer(("127.0.0.1", NOTIFY_PORT), NotifyHandler)
+    require_https(SHIP_CAMERA)
+    notify = secure_server(ThreadingServer(("127.0.0.1", NOTIFY_PORT), NotifyHandler), CERT, KEY)
     threading.Thread(target=notify.serve_forever, daemon=True).start()
     try:
         load_history()
@@ -347,4 +355,4 @@ if __name__ == "__main__":
     threading.Thread(target=sub_maintenance, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
     log(f"ANCHOR shore dashboard on :{PORT}")
-    ThreadingServer(("0.0.0.0", PORT), Handler).serve_forever()
+    secure_server(ThreadingServer(("0.0.0.0", PORT), Handler), CERT, KEY).serve_forever()
