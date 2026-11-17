@@ -1,0 +1,12 @@
+[Unit]
+Description=ANCHOR shore-link (wlan1) reconnect watchdog
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/bin/sh /opt/anchor/hardware/ship-gateway-pi5/uplink-watch/uplink_watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

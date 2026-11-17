@@ -101,8 +101,7 @@ class AnchorNode {
     notifyRespTopic_ = String("/oneM2M/resp/") + CSE_ID + "/" + orig_ + "/json";
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    wifiBeginAt_ = millis();
+    joinWifi(0);
     net_.setHandshakeTimeout(5);
     mqtt_.setBufferSize(8192);
     mqtt_.setKeepAlive(15);
@@ -115,11 +114,11 @@ class AnchorNode {
     if (WiFi.status() != WL_CONNECTED) {
       // The core gives up after a failed association (status 4) or a lost AP; restart the join
       // ourselves every 10 s so a node that drifted out of range rejoins when it comes back.
+      // With WIFI_SSID2 defined, each retry alternates between the ship AP and the fallback.
       if (millis() - wifiBeginAt_ > 10000) {
-        wifiBeginAt_ = millis();
-        WiFi.disconnect();
-        WiFi.begin(WIFI_SSID, WIFI_PASS);
         Serial.printf("[NET] Wi-Fi rejoin (status was %d)\n", WiFi.status());
+        WiFi.disconnect();
+        joinWifi(kNets > 1 ? 1 - wifiNet_ : 0);
       }
       if (millis() - lastWifiLog_ > 5000) {
         lastWifiLog_ = millis();
@@ -135,6 +134,7 @@ class AnchorNode {
     ArduinoOTA.handle();
 #endif
     if (otaActive_) return;  // keep the radio for the firmware transfer
+    if (wifiNet_ != 0 && preferPrimary()) return;
 
     // Start SNTP only once the link is up (a request sent before that can stall the first sync).
     // Re-arm every 30 s until synced; chrony on the Pi; timestamps are UTC epoch ms.
@@ -248,10 +248,59 @@ class AnchorNode {
 
   char cseHost_[16] = CSE_HOST;  // current CSE address (PubSubClient keeps the pointer)
 
+  // Wi-Fi networks: [0] the ship's own AP (preferred), [1] optional fallback (e.g. the hotspot
+  // the ship Pi's uplink is also on). Each has its own CSE_HOST fallback for when mDNS is silent.
+#ifdef WIFI_SSID2
+  static constexpr int kNets = 2;
+  const char *kNetSsid[2] = {WIFI_SSID, WIFI_SSID2};
+  const char *kNetPass[2] = {WIFI_PASS, WIFI_PASS2};
+  const char *kNetCse[2] = {CSE_HOST, CSE_HOST2};
+#else
+  static constexpr int kNets = 1;
+  const char *kNetSsid[1] = {WIFI_SSID};
+  const char *kNetPass[1] = {WIFI_PASS};
+  const char *kNetCse[1] = {CSE_HOST};
+#endif
+  int wifiNet_ = 0;  // index into kNetSsid of the network being joined
+  uint32_t lastScan_ = 0;
+  bool scanning_ = false;
+
+  void joinWifi(int n) {
+    wifiNet_ = n;
+    wifiBeginAt_ = millis();
+    WiFi.begin(kNetSsid[n], kNetPass[n]);
+    Serial.printf("[NET] Wi-Fi join '%s'\n", kNetSsid[n]);
+  }
+
+  // On the fallback network, look for the ship AP once a minute and move back when it is up.
+  // Returns true when it dropped the link to rejoin (loop() then reconnects everything).
+  bool preferPrimary() {
+    if (!scanning_) {
+      if (millis() - lastScan_ < 60000) return false;
+      lastScan_ = millis();
+      scanning_ = WiFi.scanNetworks(true) == WIFI_SCAN_RUNNING;
+      return false;
+    }
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) return false;
+    scanning_ = false;
+    bool seen = false;
+    for (int i = 0; i < n; i++) seen |= WiFi.SSID(i) == kNetSsid[0];
+    WiFi.scanDelete();
+    if (!seen) return false;
+    Serial.printf("[NET] ship AP '%s' is back, switching\n", kNetSsid[0]);
+    mqtt_.disconnect();
+    WiFi.disconnect();
+    joinWifi(0);
+    registered_ = false;
+    ntpStarted_ = false;
+    return true;
+  }
+
   // mDNS lookup of the ship Pi; MDNS is already running because ArduinoOTA starts it.
   void resolveCse() {
     IPAddress ip = MDNS.queryHost(CSE_MDNS, 1500);
-    String found = ip == IPAddress() ? String(CSE_HOST) : ip.toString();
+    String found = ip == IPAddress() ? String(kNetCse[wifiNet_]) : ip.toString();
     if (found != cseHost_) {
       Serial.printf("[NET] CSE %s -> %s%s\n", cseHost_, found.c_str(), ip == IPAddress() ? " (mDNS miss, fallback)" : " (mDNS)");
       strlcpy(cseHost_, found.c_str(), sizeof cseHost_);
