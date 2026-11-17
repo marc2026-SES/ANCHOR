@@ -40,6 +40,8 @@ class Client:
         return self.endpoint.root
 
     def request(self, method, target, body=None, ty=None, params=None, headers=None):
+        from .tls import require_https
+        require_https(self.endpoint.url)
         if not hasattr(self._local, 'session'):
             self._local.session = requests.Session()
             self._local.session.trust_env = False
@@ -51,7 +53,10 @@ class Client:
         h.update(headers or {})
         response = self._local.session.request(method, self.endpoint.url.rstrip('/') + quote(path, safe='/~:'),
                                               json=body, params=params, headers=h,
-                                              timeout=self.endpoint.timeout, verify=self.endpoint.ca)
+                                              timeout=self.endpoint.timeout, verify=self.endpoint.ca,
+                                              allow_redirects=False)
+        if 300 <= response.status_code < 400:
+            raise ValueError('CSE redirects are disabled')
         try:
             data = response.json() if response.content else {}
         except ValueError:

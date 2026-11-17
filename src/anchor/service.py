@@ -85,7 +85,12 @@ def make_server(runtime, token):
             except Exception as exc:
                 self.send(503, {'error': str(exc)})
 
-    return ThreadingHTTPServer((runtime.settings.bind, runtime.settings.port), Handler)
+    cfg = runtime.settings
+    if not (cfg.tls_cert and cfg.tls_key):
+        raise ValueError('API listeners require TLS certificates')
+    server = ThreadingHTTPServer((cfg.bind, cfg.port), Handler)
+    from .tls import secure_server
+    return secure_server(server, cfg.tls_cert, cfg.tls_key)
 
 
 def serve(settings):

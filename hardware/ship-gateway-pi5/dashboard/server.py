@@ -2,9 +2,9 @@
 """ANCHOR ship dashboard: camera MJPEG + latest sensor values read from the ship MN-CSE.
 
 Runs on the ship Pi with the system python (picamera2 comes from apt).
-  http://<pi>:8090/            dashboard page
-  http://<pi>:8090/stream.mjpg camera stream
-  http://<pi>:8090/api/state   JSON: latest CIN per container + short history
+  https://<pi>:8090/            dashboard page
+  https://<pi>:8090/stream.mjpg camera stream
+  https://<pi>:8090/api/state   JSON: latest CIN per container + short history
 Sensor values are read from the CSE (GET .../<cnt>/la), not sniffed from MQTT,
 so the page shows exactly what oneM2M has stored.
 """
@@ -19,9 +19,13 @@ from datetime import datetime, timezone
 from http import server
 from pathlib import Path
 from socketserver import ThreadingMixIn
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+from anchor.tls import host_tls_files, open_https, client_context, secure_server, require_https
+CA, CERT, KEY = host_tls_files()
 
 PORT = 8090
-CSE = "http://127.0.0.1:8080/~/id-ship/cse-ship"
+CSE = "https://127.0.0.1:8080/~/id-ship/cse-ship"
 HEADERS = {"X-M2M-Origin": "CAnchorShip", "X-M2M-RVI": "3", "Accept": "application/json"}
 CONTAINERS = [
     "bridge/attitude", "bridge/position",
@@ -57,7 +61,7 @@ def poll_cse():
             rqi += 1
             req = urllib.request.Request(f"{CSE}/{cnt}/la", headers={**HEADERS, "X-M2M-RI": f"dash{rqi}"})
             try:
-                with urllib.request.urlopen(req, timeout=2) as r:
+                with open_https(req, ca=CA, timeout=2) as r:
                     cin = json.load(r)["m2m:cin"]
             except urllib.error.HTTPError as e:
                 if e.code != 404:  # 404 = container exists but is still empty
@@ -188,7 +192,9 @@ class LiveFeed:
     def run(self):
         import subprocess
         while True:
-            p = subprocess.Popen(["mosquitto_sub", "-h", "127.0.0.1", "-t", "anchor/live/#", "-v"],
+            p = subprocess.Popen(["mosquitto_sub", "-h", "127.0.0.1", "-p", "8883",
+                                  "--cafile", str(CA), "--cert", str(CERT), "--key", str(KEY),
+                                  "-t", "anchor/live/#", "-v"],
                                  stdout=subprocess.PIPE, text=True)
             for line in p.stdout:
                 topic, _, payload = line.strip().partition(" ")
@@ -239,7 +245,7 @@ def send_command(ae, con):
     req = urllib.request.Request(
         f"{CSE}/{ae}/command", data=body, method="POST",
         headers={**HEADERS, "X-M2M-RI": f"cmd{time.time():.0f}", "Content-Type": "application/json;ty=4"})
-    with urllib.request.urlopen(req, timeout=3) as r:
+    with open_https(req, ca=CA, timeout=3) as r:
         return r.status
 
 
@@ -270,4 +276,4 @@ if __name__ == "__main__":
     threading.Thread(target=poll_cse, daemon=True).start()
     threading.Thread(target=live.run, daemon=True).start()
     print(f"ANCHOR dashboard on :{PORT}", flush=True)
-    ThreadingServer(("0.0.0.0", PORT), Handler).serve_forever()
+    secure_server(ThreadingServer(("0.0.0.0", PORT), Handler), CERT, KEY).serve_forever()

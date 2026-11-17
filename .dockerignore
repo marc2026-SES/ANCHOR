@@ -12,3 +12,8 @@ hardware
 tests
 build
 *.egg-info
+
+**/anchor_*_tls.h
+**/*.key
+**/*.pem
+**/*.crt

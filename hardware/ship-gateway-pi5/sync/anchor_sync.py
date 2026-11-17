@@ -10,5 +10,5 @@ from anchor.cli import main
 if __name__ == "__main__":
     config = os.environ.get("ANCHOR_CONFIG")
     if not config:
-        raise SystemExit("Set ANCHOR_CONFIG=/path/to/anchor/deploy/ship.json; see root README migration steps")
+        raise SystemExit("Set ANCHOR_CONFIG=/path/to/anchor/deploy/ship/core.json; see root README migration steps")
     main(["--config", config, "serve"])

@@ -9,6 +9,7 @@
 #pragma once
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 #include <PubSubClient.h>
@@ -40,11 +41,31 @@
 // the same address (whoever joins first wins), so the nodes look the Pi up by name and only fall
 // back to CSE_HOST when mDNS does not answer.
 #ifndef CSE_MDNS
-#define CSE_MDNS "piking"
+#define CSE_MDNS "ship"
 #endif
 #ifndef POA_BROKER
 #define POA_BROKER "127.0.0.1"
 #endif
+
+#ifndef MQTT_TLS_HOST
+#define MQTT_TLS_HOST "ship.local"
+#endif
+#ifndef ANCHOR_ENABLE_OTA
+#define ANCHOR_ENABLE_OTA 0
+#endif
+
+// mDNS chooses an address, but only the configured certificate name is trusted.
+// Arduino-ESP32 3.3.x supports connecting to an IP with a separate TLS hostname.
+class AnchorSecureClient : public WiFiClientSecure {
+ public:
+  using WiFiClientSecure::connect;
+  int connect(const char *address, uint16_t port) override {
+    IPAddress ip;
+    if (!ip.fromString(address)) return 0;
+    return WiFiClientSecure::connect(ip, port, MQTT_TLS_HOST,
+                                    ANCHOR_TLS_CA, ANCHOR_TLS_CERT, ANCHOR_TLS_KEY);
+  }
+};
 
 class AnchorNode {
  public:
@@ -82,6 +103,7 @@ class AnchorNode {
     WiFi.setSleep(false);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     wifiBeginAt_ = millis();
+    net_.setHandshakeTimeout(5);
     mqtt_.setBufferSize(8192);
     mqtt_.setKeepAlive(15);
     mqtt_.setCallback([this](char *t, byte *p, unsigned int n) { onMessage(t, p, n); });
@@ -107,8 +129,11 @@ class AnchorNode {
       ntpStarted_ = false;
       return;
     }
+    if (!mdnsStarted_) mdnsStarted_ = MDNS.begin((String("anchor-") + ae_).c_str());
+#if ANCHOR_ENABLE_OTA
     if (!otaStarted_) startOta();
     ArduinoOTA.handle();
+#endif
     if (otaActive_) return;  // keep the radio for the firmware transfer
 
     // Start SNTP only once the link is up (a request sent before that can stall the first sync).
@@ -123,6 +148,10 @@ class AnchorNode {
       if (millis() - lastTry_ < 3000) return;
       lastTry_ = millis();
       resolveCse();
+      if (!nowMs()) {
+        Serial.println("[TLS] Waiting for Pi NTP before certificate validation");
+        return;
+      }
       Serial.printf("[NET] Wi-Fi OK ip=%s rssi=%d, MQTT connecting to %s...\n", WiFi.localIP().toString().c_str(),
                     WiFi.RSSI(), cseHost_);
       String cid = String(orig_) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
@@ -167,7 +196,7 @@ class AnchorNode {
     return enqueue(cnt, String("hw-") + bootId_ + "-" + sequence, payload);
   }
 
-  // Low-latency telemetry outside oneM2M (plain MQTT, not stored by the CSE), e.g. 20 Hz attitude
+  // Low-latency telemetry outside oneM2M (MQTTS, not stored by the CSE), e.g. 20 Hz attitude
   // for the live 3D view. The oneM2M CIN path stays the system of record.
   bool publishLive(const char *topic, const char *payload) {
     if (!mqtt_.connected() || otaActive_) return false;
@@ -194,7 +223,7 @@ class AnchorNode {
   const char *orig_, *ae_, *api_;
   const char *cnts_[8];
   int nCnt_ = 0;
-  WiFiClient net_;
+  AnchorSecureClient net_;
   PubSubClient mqtt_;
   String reqTopic_, respTopic_, notifyTopic_, notifyRespTopic_;
   CommandHandler onCommand_;
@@ -208,6 +237,7 @@ class AnchorNode {
   Preferences commandPrefs_;
   JsonDocument commandState_;
   AnchorReportProfile profile_;
+  bool mdnsStarted_ = false;
   bool registered_ = false, ntpStarted_ = false, otaStarted_ = false, otaActive_ = false;
   uint32_t ntpAt_ = 0, wifiBeginAt_ = 0, lastRegTry_ = 0;
   uint32_t lastTry_ = 0, lastWifiLog_ = 0, rqiN_ = 0, seq_ = 0;
@@ -440,7 +470,7 @@ class AnchorNode {
     String base = String(CSE_NAME);
     String aePath = base + "/" + ae_;
     // Request-reachable with an MQTT point of access, so the CSE can push notifications to us.
-    String reach = String("\"lbl\":[\"anchor:hardware\",\"device:") + ae_ + "\"]," + String("\"rr\":") + ((onCommand_ || profileEnabled_) ? "true,\"poa\":[\"mqtt://" POA_BROKER ":" + String(MQTT_PORT) + "\"]"
+    String reach = String("\"lbl\":[\"anchor:hardware\",\"device:") + ae_ + "\"]," + String("\"rr\":") + ((onCommand_ || profileEnabled_) ? "true,\"poa\":[\"mqtts://" POA_BROKER ":" + String(MQTT_PORT) + "\"]"
                                                     : String("false"));
     int rsc = request(1, base, 2,
                       String("{\"m2m:ae\":{\"rn\":\"") + ae_ + "\",\"api\":\"" + api_ + "\"," + reach +

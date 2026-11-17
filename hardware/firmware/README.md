@@ -1,6 +1,6 @@
 # ESP32 센서 노드 펌웨어
 
-ESP32 세 대가 각자 센서를 읽어 선박 Pi 5의 ACME MN-CSE에 oneM2M 리소스로 저장한다. 통신은 Wi-Fi 위의 **oneM2M MQTT 바인딩**이다.
+ESP32 세 대가 각자 센서를 읽어 선박 Pi 5의 ACME MN-CSE에 oneM2M 리소스로 저장한다. 통신은 Wi-Fi 위의 **oneM2M MQTT 바인딩 + TLS(MQTTS 8883)**이다.
 
 | 스케치 | 보드 (FQBN) | 센서 | AE / Originator | 컨테이너와 주기 |
 |---|---|---|---|---|
@@ -10,9 +10,9 @@ ESP32 세 대가 각자 센서를 읽어 선박 Pi 5의 ACME MN-CSE에 oneM2M �
 
 핀 배선은 [../docs/wiring.md](../docs/wiring.md)에 있다.
 
-## 통합 core 변경 사항 (2026-11-16)
+## 통합 core·보안 전송 변경 (2026-11-17)
 
-센서 드라이버·핀·영점 보정·OTA는 유지했다. 새 core에 맞춰 CSE의 CNT 자동 축출을 끄고 `bootstrap`한 뒤 펌웨어를 갱신한다. 자세한 전환 순서는 [루트 README](../../README.md)에 있다.
+센서 드라이버·핀·영점 보정은 유지했다. 통신은 MQTTS로 전환했으며 ArduinoOTA는 코드만 보관하고 기본 비활성화했다. 새 core에 맞춰 CSE의 CNT 자동 축출을 끄고 `bootstrap`한 뒤 펌웨어를 갱신한다. 자세한 전환 순서는 [루트 README](../../README.md)에 있다.
 
 - `bootId`, `vesselId`, `deviceId`, `eventId`, `uptimeMs`, `droppedBefore`를 원래 JSON에 추가한다.
 - 최대 32건 RAM 큐에 넣고 같은 CIN 이름·본문으로 재시도한다. CSE가 중복을 응답하면 기존 본문을 읽어 비교한다. 큐 초과와 CSE 수신 전 전원 손실은 구분한다.
@@ -29,12 +29,13 @@ ESP32 세 대가 각자 센서를 읽어 선박 Pi 5의 ACME MN-CSE에 oneM2M �
 
 | 기능 | 하는 일 |
 |---|---|
-| **연결** | Wi-Fi에 접속하고, 끊기면 10초마다 다시 붙는다. Pi 5는 mDNS 이름(`piking`)으로 찾고, 실패하면 `CSE_HOST`로 접속한다. MQTT가 끊기면 3초마다 다시 접속한다. |
+| **연결** | Wi-Fi에 접속하고, 끊기면 10초마다 다시 붙는다. Pi 5는 mDNS 이름(기본 `ship`)으로 찾고, 실패하면 `CSE_HOST`로 접속한다. MQTTS가 끊기면 3초마다 다시 접속한다. |
 | **등록** | AE와 CNT를 만든다. 이미 있으면(4117/4105 응답) AE를 업데이트하는 것으로 넘어간다. 그래서 선박 CSE DB가 초기화돼도 노드가 알아서 다시 등록한다. |
 | **데이터** | CIN의 `con`에 부팅·이벤트 ID, `seq`(노드별 순번), `ts`(UTC 밀리초)를 붙인다. 시각은 Pi 5의 chrony에서 SNTP로 받는다. |
-| **명령** | `<ae>/command` 컨테이너와 SUB를 만들어 둔다. CSE가 MQTT로 보낸 알림을 받으면 콜백을 호출한다. BRIDGE 영점 조정과 BRIDGE/ENGINE 보고 주기 명령이 이 경로를 쓴다. |
-| **실시간 경로** | `publishLive()`로 oneM2M을 거치지 않는 일반 MQTT 메시지를 보낸다. BRIDGE 자세 20Hz 스트림(`anchor/live/bridge/attitude`)이 대시보드 3D 애니메이션용으로 이걸 쓴다. CSE에는 저장되지 않는다. |
-| **OTA** | ArduinoOTA로 무선 업데이트를 받는다. 포트는 3232, 호스트명은 `anchor-<ae>`, 비밀번호는 `OTA_PASS`다. |
+| **명령** | `<ae>/command` 컨테이너와 SUB를 만들어 둔다. CSE가 MQTTS로 보낸 알림을 받으면 콜백을 호출한다. BRIDGE 영점 조정과 BRIDGE/ENGINE 보고 주기 명령이 이 경로를 쓴다. |
+| **실시간 경로** | `publishLive()`로 oneM2M을 거치지 않는 별도 MQTTS 토픽의 메시지를 보낸다. BRIDGE 자세 20Hz 스트림(`anchor/live/bridge/attitude`)이 대시보드 3D 애니메이션용으로 이걸 쓴다. CSE에는 저장되지 않는다. |
+| **인증** | Pi의 CA·서버 이름을 확인하고 보드별 클라이언트 인증서를 제출한다. 시각이 없거나 TLS 검증에 실패하면 센서·명령 통신을 열지 않는다. |
+| **업로드** | USB를 기본으로 사용한다. 기존 ArduinoOTA 코드는 남아 있지만 `ANCHOR_ENABLE_OTA=0`이다. OTA 프로토콜은 이번 HTTPS·MQTTS 범위에 포함되지 않는다. |
 
 MQTT 메시지 예시 (CIN 생성):
 ```
@@ -45,34 +46,17 @@ topic: /oneM2M/req/CBridge/id-ship/json
 
 ## 빌드와 업로드
 
-1. **준비물:** Arduino IDE 또는 arduino-cli, esp32 보드 패키지(3.3.x에서 확인), **PubSubClient**, **ArduinoJson 7**, **DHT sensor library** 라이브러리.
-2. **설정 파일:** `libraries/AnchorNode/anchor_config.example.h`를 `anchor_config.h`로 복사한 뒤 Wi-Fi 정보, `CSE_HOST`, `OTA_PASS`를 채운다. 이 파일은 git에 올라가지 않는다.
-3. **USB로 처음 업로드:**
-   ```bash
-   arduino-cli compile --fqbn esp32:esp32:esp32s3 --library libraries/AnchorNode --output-dir /tmp/b node_bridge
-   arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p COM5 --input-dir /tmp/b node_bridge
-   ```
-   - 프로젝트 경로에 한글이 있으면 링커가 실패한다. `--output-dir`은 ASCII 경로로 지정한다.
-4. **이후에는 무선으로(OTA):** `ota.env`를 만들어 `ANCHOR_PI`(Pi 5 ssh 주소), `ANCHOR_OTA_PASS`, `ARDUINO_CLI`를 적은 뒤 실행한다.
-   ```bash
-   ./ota.sh bridge 192.168.50.22   # <bridge|engine|cargo> <노드 IP>
-   ```
-   - 펌웨어는 노트북에서 ssh로 Pi 5에 올라간 뒤, Pi 5가 ESP32로 보낸다.
-   - Pi 5의 `~/anchor/ota/`에 `espota.py`가 있어야 한다. esp32 Arduino 코어의 `tools` 폴더에 있는 파일을 복사해 둔다.
+1. Arduino IDE 또는 arduino-cli, **Arduino-ESP32 3.3.x**, PubSubClient, ArduinoJson 7, DHT sensor library를 준비한다. TLS의 IP 주소·서버 이름 분리 API 때문에 3.3.x를 대상으로 한다.
+2. `libraries/AnchorNode/anchor_config.example.h`를 `anchor_config.h`로 복사한다. Wi-Fi, `CSE_HOST`(주소 검색 실패 시 사용할 IP), `CSE_MDNS`(Pi 이름), `MQTT_TLS_HOST`(인증서 DNS 이름), `MQTT_PORT=8883`을 설정한다. 기존 설정 파일을 쓰는 경우에도 포트와 TLS 이름을 갱신한다.
+3. 저장소 루트에서 `python3 scripts/provision-tls.py --output .runtime-pki`로 발급한 `firmware/anchor_bridge_tls.h`, `anchor_engine_tls.h`, `anchor_cargo_tls.h`를 `libraries/AnchorNode/`에 넣는다. 각 스케치는 자기 인증서·키만 포함한다. CA의 개인키는 장치에 넣지 않는다. 이 파일들과 Wi-Fi 설정은 Git·배포 소스 묶음에서 제외한다.
+4. 선박 Pi의 Mosquitto에 서버 인증서를 배치하고 MQTTS·클라이언트 인증을 켠다. chrony 시각도 확인한다. [루트 README](../../README.md#httpsmqtts-설정)에 배치·실행 순서가 있다.
+5. 저장소 루트에서 `scripts/check-firmware.sh`로 세 보드를 빌드한다. 보드 업로드 예시는 다음과 같다. 터미널 경로는 `hardware/firmware`이며 USB 포트는 실제 값으로 바꾼다.
 
-## 운용 메모
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32s3 --library libraries/AnchorNode --output-dir /tmp/anchor-bridge node_bridge
+arduino-cli upload --fqbn esp32:esp32:esp32s3 -p /dev/ttyACM0 --input-dir /tmp/anchor-bridge node_bridge
+```
 
-- **MPU6050 장착:** 부품면이 위, X 화살표가 선수 방향이 되게 단다. 이 방향일 때 roll +는 우현이 내려간 것이고, pitch +는 선수가 내려간 것이다.
-- **자이로 보정:** 부팅 직후 2초 동안 자이로 바이어스를 보정한다. 그동안 보드를 움직이지 않는다.
-- **영점 조정:** `bridge/command`에 `"zero"` CIN을 만들면 현재 자세가 0°로 플래시에 저장된다. 선박 대시보드의 버튼이 이걸 대신 해 준다. `"unzero"`를 보내면 해제된다.
-- **MQ-2:** 켠 뒤 120초까지는 `warm=false`(예열 중)로 표시된다. AO 출력은 반드시 분압을 거쳐 GPIO34에 연결한다.
+WROOM과 C6는 위 표의 FQBN과 각 스케치를 사용한다. C6는 `CDCOnBoot=cdc`를 사용한다. 기존 NVS 영점값·명령 이력은 별도 namespace에 있으므로 무조건 flash 전체를 지우지 않는다.
 
-## `tools/` 센서 테스트 스케치
-
-oneM2M 없이 센서만 시리얼로 확인할 때 쓴다.
-
-| 스케치 | 용도 |
-|---|---|
-| `test_bridge`, `test_engine`, `test_cargo` | 노드별 센서를 읽어 시리얼로 출력 |
-| `i2c_probe`, `i2c_probe_s3` | I2C 주소 스캔 (WROOM, S3) |
-| `dht_probe_c6`, `pin_probe_c6` | C6에서 DHT11 응답과 핀 상태 확인 |
+현재 환경에는 ESP32 툴체인이 없어 이번 TLS 펌웨어 전체 빌드는 미검증이다. 장치 업로드 후 CA·호스트명 불일치 차단, 센서 CIN 저장, 명령 수신·결과 회수, 시각 동기화와 재접속을 확인해야 한다.

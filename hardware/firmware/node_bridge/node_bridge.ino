@@ -7,6 +7,7 @@
 // becomes 0 and is stored in flash. "unzero" clears it.
 #include <Wire.h>
 #include <Preferences.h>
+#include <anchor_bridge_tls.h>
 #include <AnchorNode.h>
 
 const int PIN_SDA = 8, PIN_SCL = 9, PIN_GPS_RX = 18, PIN_GPS_TX = 17;

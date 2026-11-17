@@ -11,3 +11,9 @@ hardware/firmware/libraries/AnchorNode/anchor_config.h
 **/queue.db*
 deploy/*.local.json
 deploy/cse/*.local.ini
+
+deploy/**/*.local.json
+deploy/**/*.local.ini
+**/anchor_*_tls.h
+*.key
+*.pem

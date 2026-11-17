@@ -1,0 +1,18 @@
+[Unit]
+Description=ANCHOR %i cse
+After=network-online.target time-sync.target
+Wants=network-online.target
+ConditionPathExists=/opt/anchor/deploy/%i/run.sh
+
+[Service]
+User=pi
+WorkingDirectory=/opt/anchor
+ExecStart=/opt/anchor/deploy/%i/run.sh cse
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=35
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

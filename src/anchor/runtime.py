@@ -110,8 +110,10 @@ class Runtime:
                     self.quarantine('/'.join(source_key), exc)
                 # Capacity and CSE failures propagate. Never mark an unarchived source as seen.
             try:
-                self.local.ensure(path, 23, {'m2m:sub': {'rn': 'anchor-core', 'nu': [self.settings.notify_url],
-                                                        'enc': {'net': [3]}, 'nct': 1}})
+                subscription = self.local.ensure(path, 23, {'m2m:sub': {
+                    'rn': 'anchor-core', 'nu': [self.settings.notify_url], 'enc': {'net': [3]}, 'nct': 1}})
+                if resource(subscription).get('nu') != [self.settings.notify_url]:
+                    self.local.update(path + '/anchor-core', {'m2m:sub': {'nu': [self.settings.notify_url]}})
             except Exception as exc:
                 self.error('subscription:' + path, exc)  # historical scan still works
 

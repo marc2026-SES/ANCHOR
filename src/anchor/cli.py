@@ -11,7 +11,7 @@ from .config import Settings
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='ANCHOR real hardware: ship / coastal edge / shore')
-    parser.add_argument('--config', required=True, help='deploy/ship.json, edge.json or shore.json')
+    parser.add_argument('--config', required=True, help='deploy/<ship|edge|shore>/core.json')
     sub = parser.add_subparsers(dest='command', required=True)
     for name in ('serve', 'bootstrap', 'status', 'init-token'):
         sub.add_parser(name)
@@ -59,9 +59,11 @@ def main(argv=None):
         host = '127.0.0.1' if settings.bind == '0.0.0.0' else settings.bind
         with requests.Session() as session:
             session.trust_env = False
-            response = session.request('POST' if body is not None else 'GET', f'http://{host}:{settings.port}{path}',
-                                       json=body, timeout=15,
+            response = session.request('POST' if body is not None else 'GET', f'https://{host}:{settings.port}{path}',
+                                       json=body, timeout=15, verify=settings.tls_ca, allow_redirects=False,
                                        headers={'Authorization': 'Bearer ' + Path(settings.token_file).read_text().strip()})
+            if 300 <= response.status_code < 400:
+                raise ValueError('API redirects are disabled')
             response.raise_for_status()
             result = response.json()
     print(json.dumps(result, ensure_ascii=False, indent=2))

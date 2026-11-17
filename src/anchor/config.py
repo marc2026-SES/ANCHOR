@@ -27,7 +27,7 @@ class Endpoint:
             raise ValueError("CSE URL must be http(s)")
         if not self.root or "/" in self.root or not self.csi.startswith("/"):
             raise ValueError("Invalid CSE root or ID")
-        if self.ca is False or not 0 < self.timeout <= 30:
+        if not (self.ca is True or (isinstance(self.ca, str) and self.ca.strip())) or not 0 < self.timeout <= 30:
             raise ValueError("Certificate verification cannot be disabled; timeout must be 0..30")
 
 
@@ -38,8 +38,11 @@ class Settings:
     vessel_id: str = "ship-001"
     bind: str = "127.0.0.1"
     port: int = 8790
-    notify_url: str = "http://127.0.0.1:8790/notify"
+    notify_url: str = "https://127.0.0.1:8790/notify"
     token_file: str = ""
+    tls_cert: str = ""
+    tls_key: str = ""
+    tls_ca: str = ""
     scan_seconds: float = 2
     max_records: int = 100000
     max_bytes: int = 256000000
@@ -68,9 +71,17 @@ class Settings:
         path = Path(filename).resolve()
         data = json.loads(path.read_text())
         data['nodes'] = {k: Endpoint(**v) for k, v in data['nodes'].items()}
-        if data.get('token_file') and not Path(data['token_file']).is_absolute():
-            data['token_file'] = str(path.parent / data['token_file'])
+        for field_name in ('token_file', 'tls_cert', 'tls_key', 'tls_ca'):
+            if data.get(field_name) and not Path(data[field_name]).is_absolute():
+                data[field_name] = str((path.parent / data[field_name]).resolve())
         for endpoint in data['nodes'].values():
             if isinstance(endpoint.ca, str) and not Path(endpoint.ca).is_absolute():
                 object.__setattr__(endpoint, 'ca', str(path.parent / endpoint.ca))
-        return cls(**data)
+        settings = cls(**data)
+        from .tls import require_https
+        require_https(settings.notify_url)
+        for endpoint in settings.nodes.values():
+            require_https(endpoint.url)
+        if not all((settings.tls_cert, settings.tls_key, settings.tls_ca)):
+            raise ValueError('Deployment config requires tls_cert, tls_key and tls_ca')
+        return settings

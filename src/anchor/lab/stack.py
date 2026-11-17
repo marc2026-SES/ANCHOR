@@ -38,7 +38,7 @@ def prepare():
         os.chmod(RUNTIME / "db-password", 0o600)
     broker = RUNTIME / "broker"
     broker.mkdir(exist_ok=True)
-    (broker / "mosquitto.conf").write_text(f"""# Local developer network only. See docs/DEPLOYMENT_PI5.md for device credentials.
+    (broker / "mosquitto.conf").write_text(f"""# Local developer network only. See README.md for deployment requirements.
 listener {BROKER_PORT} 127.0.0.1
 allow_anonymous true
 certfile {certs / 'localhost.crt'}

@@ -2,6 +2,7 @@
 //  vibration : ADXL345 RMS over 1 s (200 Hz sampling), 1 Hz  (SDA 21, SCL 22, addr 0x53)
 //  gas       : MQ-2 sensor voltage, 0.5 Hz (AO -> 10k/20k divider -> GPIO34)
 #include <Wire.h>
+#include <anchor_engine_tls.h>
 #include <AnchorNode.h>
 
 const uint8_t ADXL = 0x53;

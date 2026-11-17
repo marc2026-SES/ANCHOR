@@ -2,6 +2,7 @@
 //  climate : DHT11 temperature/humidity, every 5 s (DATA -> GPIO4)
 //  hatch   : MC-38 door switch GPIO5<->GND (pull-up), on every change + every 30 s
 #include <DHT.h>
+#include <anchor_cargo_tls.h>
 #include <AnchorNode.h>
 
 const int PIN_DHT = 4, PIN_HATCH = 5;

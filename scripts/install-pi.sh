@@ -2,7 +2,7 @@
 set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 venv_dir="${ANCHOR_VENV:-$repo_root/.venv}"
-acme_dir="${ANCHOR_ACME:-$(dirname -- "$repo_root")/ACME-oneM2M-CSE}"
+acme_dir="${ANCHOR_ACME:-$repo_root/.runtime-acme-source}"
 acme_pin="283bd7d696090e983c07c149511102caab99642e"
 
 if [ "$(id -u)" = 0 ]; then
@@ -26,6 +26,6 @@ if [ -n "$(git -C "$acme_dir" status --porcelain)" ]; then
     exit 1
 fi
 python3 -m venv "$venv_dir"
-"$venv_dir/bin/python" -m pip install -e "$acme_dir" -e "$repo_root[test]"
+"$venv_dir/bin/python" -m pip install -e "$acme_dir" -e "$repo_root"
 printf '\nInstalled. Activate with: source "%s/bin/activate"\n' "$venv_dir"
-echo 'Configure deploy/<ship|edge|shore>.json and the matching CSE. See README migration steps.'
+echo 'Configure deploy/<ship|edge|shore>/core.json and cse.ini. See README migration steps.'
