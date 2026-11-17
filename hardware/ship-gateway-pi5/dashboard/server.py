@@ -38,10 +38,13 @@ TRACKED = [
     ("engine/vibration", "vib_rms_g"), ("engine/gas", "mq2_v"),
     ("cargo/climate", "temp_c"), ("cargo/climate", "rh"),
 ]
-HISTORY_LEN = 300
+HISTORY_LEN = 600  # ~10 min at the 1 s attitude/vibration period (the page shows the last 5 min)
+LINK_CNT = "sync/link"  # shore-link state written every 5 s by the sync agent (kept even while offline)
 PAGE = (Path(__file__).parent / "index.html").read_bytes()
+BOOT = time.time()  # lets the page notice a restart and re-open the camera stream
 
-state = {"latest": {}, "history": {f"{c}.{k}": deque(maxlen=HISTORY_LEN) for c, k in TRACKED}, "cse_ok": False}
+state = {"latest": {}, "history": {f"{c}.{k}": deque(maxlen=HISTORY_LEN) for c, k in TRACKED},
+         "link_hist": deque(maxlen=200), "cse_ok": False}
 state_lock = threading.Lock()
 
 
@@ -57,14 +60,14 @@ def poll_cse():
     last_ri = {}
     while True:
         ok = True
-        for cnt in CONTAINERS:
+        for cnt in CONTAINERS + [LINK_CNT]:
             rqi += 1
             req = urllib.request.Request(f"{CSE}/{cnt}/la", headers={**HEADERS, "X-M2M-RI": f"dash{rqi}"})
             try:
                 with open_https(req, ca=CA, timeout=2) as r:
                     cin = json.load(r)["m2m:cin"]
             except urllib.error.HTTPError as e:
-                if e.code != 404:  # 404 = container exists but is still empty
+                if e.code != 404 and cnt != LINK_CNT:  # 404 = container exists but is still empty
                     ok = False
                 continue
             except Exception:
@@ -79,6 +82,8 @@ def poll_cse():
                 state["latest"][cnt] = {"con": con, "ct": ct, "ri": cin.get("ri")}
                 if last_ri.get(cnt) != cin.get("ri"):
                     last_ri[cnt] = cin.get("ri")
+                    if cnt == LINK_CNT and con.get("state"):
+                        state["link_hist"].append((round(ct, 2), con["state"]))
                     for c, k in TRACKED:
                         if c == cnt and isinstance(con.get(k), (int, float)):
                             state["history"][f"{c}.{k}"].append((round(ct, 2), con[k]))
@@ -150,7 +155,9 @@ class Handler(server.BaseHTTPRequestHandler):
             with state_lock:
                 body = {
                     "now": time.time(),
+                    "boot": BOOT,
                     "cse_ok": state["cse_ok"],
+                    "link_hist": list(state["link_hist"]),
                     "camera": camera_error is None and camera_output is not None,
                     "camera_error": camera_error,
                     "latest": state["latest"],

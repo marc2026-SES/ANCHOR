@@ -4,6 +4,12 @@
 #define WIFI_SSID "your-hotspot"
 #define WIFI_PASS "your-password"
 
+// Optional fallback network (tried when the first one is not reachable; the node moves back to
+// the first one when it reappears). Its CSE_HOST2 is used when mDNS does not answer there.
+// #define WIFI_SSID2 "your-hotspot"
+// #define WIFI_PASS2 "your-password"
+// #define CSE_HOST2 "10.0.0.2"
+
 // Ship Pi (MN-CSE + Mosquitto + chrony) IP on that Wi-Fi, used when the mDNS lookup fails
 #define CSE_HOST "192.168.0.10"
 #define MQTT_PORT 8883
