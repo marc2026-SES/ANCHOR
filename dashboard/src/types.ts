@@ -45,7 +45,11 @@ export interface Delivered extends AnchorEvent {
 }
 
 /** One change of a link (core status: links[peer].reachable, observedAt). */
-export interface LinkChange { t: number; link: LinkId; up: boolean }
+/** source: who saw it. 'inferred' = read from a gap in the arrivals (the core could not report), see infer_outages */
+export interface LinkChange { t: number; link: LinkId; up: boolean; source?: string }
+
+/** what a link pill shows; unknown = live mode and no fresh report from the core that uses the link */
+export type LinkState = 'up' | 'down' | 'unknown'
 
 /** A shore command (src/anchor/commands.py) and when each step was observed. */
 export interface Command {
@@ -71,14 +75,23 @@ export interface FeedItem {
   text: string
 }
 
+/** what only the live monitor knows: link state reported by the cores, counts the shore cannot see itself */
+export interface LiveInfo {
+  links: Record<LinkId, { known: boolean; up: boolean | null; observedAt: number | null; source: string | null }>
+  backlog: { generated?: number; heldOnShip?: number; waitingAtCoast?: number; atCoast?: number } | null
+  sources: { shore: boolean | null; coast: boolean | null; subscription: boolean | null }
+}
+
 export interface Run {
   runId: string
   mode: 'anchor' | 'baseline'
   start: number
   end: number
-  /** every event the ship generated (mock: ground truth; live: the ship journal) */
+  /** every event the ship generated (mock: ground truth) · live: every event that reached the coast or the shore */
   events: Delivered[]
   links: LinkChange[]
   commands: Command[]
   feed: FeedItem[]
+  /** set only for a run read from the Shore Monitor AE while it is still open */
+  live?: LiveInfo | null
 }

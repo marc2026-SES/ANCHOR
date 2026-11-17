@@ -1,0 +1,58 @@
+{
+  "_comment": "Shore Pi 4. Copy to shore-monitor.json next to this file and check the addresses. secrets/ holds api-token (init-token creates it) and the ship and edge cores' status-token files.",
+  "origin": "CAnchorDashboard",
+  "shore": {
+    "url": "https://127.0.0.1:8080",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "edge": {
+    "url": "https://edge.local:8080",
+    "root": "cse-edge",
+    "csi": "/id-edge",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "ship": {
+    "url": "https://ship.local:8080",
+    "root": "cse-ship",
+    "csi": "/id-ship",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "notify": {
+    "bind": "127.0.0.1",
+    "port": 8796,
+    "url": "https://127.0.0.1:8796/notify",
+    "sub_name": "shore-monitor"
+  },
+  "api": {
+    "bind": "0.0.0.0",
+    "port": 8795,
+    "token_file": "secrets/api-token"
+  },
+  "cores": {
+    "ship": {
+      "url": "https://ship.local:8790",
+      "token_file": "secrets/ship-status-token"
+    },
+    "edge": {
+      "url": "https://edge.local:8790",
+      "token_file": "secrets/edge-status-token"
+    }
+  },
+  "tls": {
+    "ca": "/opt/anchor/.runtime-shore/tls/ca.crt",
+    "cert": "/opt/anchor/.runtime-shore/tls/server.crt",
+    "key": "/opt/anchor/.runtime-shore/tls/server.key"
+  },
+  "scan_seconds": 2,
+  "db": "data/shore-monitor.db",
+  "run": {
+    "id": "live",
+    "mode": "anchor",
+    "history_minutes": 60
+  }
+}
