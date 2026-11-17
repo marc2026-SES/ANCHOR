@@ -25,6 +25,9 @@ def prepare(role):
     tls = runtime / 'tls'
     os.environ['ANCHOR_TLS_DIR'] = str(tls)
     os.environ['REQUESTS_CA_BUNDLE'] = str(tls / 'ca.crt')
+    dds_prefix = Path(os.environ.get('ANCHOR_DDS_PREFIX', ROOT / '.runtime-dds'))
+    if dds_prefix.exists():
+        os.environ.setdefault('CYCLONEDDS_HOME', str(dds_prefix))
     return config, settings, runtime
 
 
@@ -68,6 +71,14 @@ def main(argv=None):
             raise ValueError('CSE MQTTS and certificate verification are required')
         os.chdir(target)
         command = [str(python), '-m', 'anchor.acme_tls', '--headless', '--base-directory', str(target), '--config', 'acme.ini', *rest]
+    elif action in ('dds', 'dds-check'):
+        if role == 'shore':
+            raise ValueError('DDS runs on the ship publisher and coastal IPE only')
+        if rest:
+            raise ValueError('DDS deployment uses its fixed role config; extra arguments are not allowed')
+        command = [str(python), '-m', 'anchor.dds.cli', '--config',
+                   str(ROOT / 'deploy' / role / 'dds.json'),
+                   'run' if action == 'dds' else 'check']
     elif action == 'dashboard':
         if role == 'edge':
             raise ValueError('Edge uses the core dashboard; it has no sensor/camera dashboard')

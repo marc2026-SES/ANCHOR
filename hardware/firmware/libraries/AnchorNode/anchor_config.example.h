@@ -28,3 +28,7 @@
 // TLS client credentials: provision-tls.py creates one anchor_<device>_tls.h per board.
 // ArduinoOTA is disabled by default; use USB for provisioning. Its protocol is not HTTPS.
 #define ANCHOR_ENABLE_OTA 0
+
+// ENGINE raw ADXL345 batches -> MQTTS -> ship native DDS publisher (default enabled).
+// Low-rate oneM2M RMS/gas records remain unchanged. Set 0 to disable this extra stream.
+#define ANCHOR_ENABLE_DDS_SOURCE 1

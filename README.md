@@ -45,7 +45,7 @@ A와 B는 독립된 연결이다. 각각 설정한 CSE에 직접 접근한다. �
 | CSE | 공통 `anchor` 외의 주요 리소스 |
 |---|---|
 | 선박 `cse-ship` | `bridge/{attitude,position,command,commandResults}`, `engine/{vibration,gas,command,commandResults}`, `cargo/{climate,hatch,temperature}`, `anchor/reportingGroup/fopt` |
-| 연안 `cse-edge` | `shipCommands/pch/pcu`: 선박 core가 폴링하는 경로 |
+| 연안 `cse-edge` | `shipCommands/pch/pcu`: 선박 core가 폴링하는 경로; DDS 옵션: `ddsIpe/{vibration,status}` |
 | 육상 `cse-in` | `edgeCommands/pch/pcu`: 연안 core가 폴링하는 경로; `anchor/events/sub-shore-dash`: 육상 센서 화면 구독 |
 
 중괄호 안은 서로 다른 자식 리소스다. 선박의 `temperature`는 SDT 온도를 표현하는 **FCNT**이며 `curT0`는 그 속성이다. `reportingGroup`은 **GRP**이고 `fopt`는 가상 팬아웃 경로다. `pch`는 **PCH**, `pcu`는 가상 폴링 경로이며 명령 원문은 여기에 보관하지 않는다.
@@ -57,6 +57,8 @@ A와 B는 독립된 연결이다. 각각 설정한 CSE에 직접 접근한다. �
 전체 리소스 트리는 로컬 통합 문서 `docs/ANCHOR_OVERVIEW.pdf`·`.md`의 **20절 통합본(선박 → 연안 → 육상) · 21절 선박 · 22절 연안 · 23절 육상**에 흰 바탕 도형으로 수록했다. 모든 리소스를 옆으로 나누지 않고 한 열로 내려 읽도록 배치했으며, 들여쓰기와 연결선으로 부모·자식 관계를 나타냈다. AE·CNT·CIN·SUB·PCH·GRP·FCNT·ACP와 가상 경로를 구분해 표시했다. **19절**에는 읽는 법, **24절**에는 ACP 연결·생성 시점·개수를 정리했다. 코드 근거는 `src/anchor/resources.py`, `runtime.py`, `commands.py`, 펌웨어 `AnchorNode.h`와 육상 `shore_server.py`다.
 
 통합 문서 **25절**은 이번 ACP·명령 재시도 수정, **26절**은 장비 전체 시험과 T1-T15, **27절**은 Shore Monitor 연결·토큰 배치·baseline 준비 상태다.
+
+**28-30절**은 native DDS 원본 파형 경로, QoS 6종, IPE 권한·실행·시험 범위를 정리한다.
 
 ## 하드웨어 통합
 
@@ -121,7 +123,67 @@ scripts/export-source.sh shore "$PWD/.runtime-packages/anchor-shore.tar.gz"
 
 8080은 그대로 쓰되 HTTPS로 접속한다. 인증서가 없거나 신뢰 검증에 실패하면 연결을 중지한다. HTTP/MQTT로 자동 우회하지 않는다. HTTP 리다이렉트도 따라가지 않는다. NTP·mDNS는 시각 동기화·주소 검색용으로 남으며, ArduinoOTA는 기본 비활성화하고 USB로 펌웨어를 올린다.
 
-MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. ACP는 자원별로 분리했고 센서 화면은 `CAnchorDashboard`로 읽는다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator 연결과 HTTPS 호출자 신원 연결은 아직 남아 있다. TLS만으로 Originator 사칭이 차단되지는 않는다. DDS는 아직 추가하지 않았다.
+MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. ACP는 자원별로 분리했고 센서 화면은 `CAnchorDashboard`로 읽는다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator 연결과 HTTPS 호출자 신원 연결은 아직 남아 있다. TLS만으로 Originator 사칭이 차단되지는 않는다. DDS 옵션은 아래 별도 보안 범위를 따른다.
+
+## Native DDS IPE: ADXL345 원본 진동 파형
+
+ROS 2·rclpy 없이 Cyclone DDS Python 11.1.0을 직접 사용한다. [참고 IPE의 고정 커밋](https://github.com/parksiw0/ROS2-oneM2M_Interworking_Proxy_Entity/tree/e87a0aab6da21c63ae88918d204a9fb15fe27fe3)에서 QoS·변환·CSE 저장을 나누는 구조를 참고해 ANCHOR용으로 작성했다. ROS 토픽 탐색·서비스·액션·22종 QoS는 가져오지 않았다.
+
+| 센서 | 코드상 목표 측정률 | 기존 전송 | 이번 DDS 대상 |
+|---|---|---|---|
+| ENGINE ADXL345 | 200 Hz, 5 ms 간격 XYZ 가속도 | 기본 약 1초 RMS·피크 요약 | **원본 XYZ 파형** |
+| BRIDGE MPU6050 | 100 Hz, 10 ms 간격 자세 계산 | 실시간 자세 20 Hz, CSE 기본 1 Hz | 기존 경로 유지 |
+| GPS / MQ-2 / DHT11 / MC-38 | 각각 2초 / 2초 / 5초 / 개폐 시 | 기존 센서 기록 | 대상 아님 |
+
+이는 코드 설정값이다. ESP32의 통신 지연·센서 읽기 실패로 실제 측정률이 낮아질 수 있으며 실측 200 Hz를 보장하지 않는다.
+
+```text
+ENGINE ADXL345 (목표 200 samples/s)
+  -> ESP32: 최대 20 samples / 약 100 ms 묶음
+  -> MQTTS QoS 0: anchor/raw/<vesselId>/engine/vibration
+  -> 선박 Pi: native DDS publisher
+  -> DDS/RTPS over UDP: AnchorVibrationV1
+  -> 연안 MEC Host: native DDS IPE
+  -> HTTPS: cse-edge/ddsIpe/vibration/<CIN> (기본 1초 창)
+            cse-edge/ddsIpe/status/<CIN>    (5초마다 상태)
+```
+
+ESP32가 DDS를 직접 실행하는 구조는 아니다. 초당 약 10개 DDS 묶음에 총 약 200개 원본 샘플을 싣는다. 실제 샘플의 상대 시각(`offsetsUs`)과 `bootId`·별도 순번을 보존한다. 기존 1초 요약값은 `engine/vibration → anchor/events` 경로로 계속 전달하고 재전송·최종 수신 확인을 유지한다. 새 원본 파형은 **보조 실시간 경로**이며 단절 후 전량 복구나 육상 저널 자동 복제를 제공하지 않는다. Monitor가 연안 CSE를 조회할 수 있지만 파형 차트 UI는 이번 변경에 포함하지 않았다.
+
+| QoS 종류 | 기본값 | 적용 의미·지원 선택지 |
+|---|---|---|
+| Reliability | BEST_EFFORT | 최신 파형 우선. RELIABLE 선택 시 DDS 구간 재전송; write 대기는 최대 20 ms |
+| Durability | VOLATILE | 늦게 붙은 reader에 이전 기록 재전달 안 함. TRANSIENT_LOCAL은 살아 있는 writer의 캐시 이용 |
+| History | KEEP_LAST, depth=20 | 최근 DDS 묶음 20개. KEEP_ALL도 내부 ResourceLimits 256개 한도를 지킴 |
+| Deadline | 300 ms | 발행/수신 간격 위반을 native DDS 상태 카운터로 관측; 전송 주기를 강제하지 않음 |
+| Lifespan | 1,500 ms | writer에 원본 첫 샘플 시각을 넣어 만료 처리. publisher/IPE도 오래된 입력을 거부 |
+| Liveliness | AUTOMATIC, lease=2,000 ms | 참여자 생존 감시. MANUAL_BY_TOPIC은 쓰기가 생존을 알리며 별도 유휴 heartbeat는 없음 |
+
+6종은 실제 native DDS 정책으로 설정한다. 메모리 보호용 ResourceLimits는 고정 내부 한도다. [공식 QoS API](https://cyclonedds.io/docs/cyclonedds-python/latest/cyclonedds.qos.html)와 [UDP·인터페이스·peer 설정](https://cyclonedds.io/docs/cyclonedds/latest/config/config_file_reference.html)을 따른다. `lifespan_ms`는 DDS 표본의 유효기간이며, `retention_seconds=60`은 **이미 CSE에 저장한 CIN의 별도 보관 기간**이다. IPE는 CSE 쓰기 큐 8개·창당 최대 400샘플로 제한하고 만료·드롭·중복·관측 순번 공백·쓰기 실패를 집계한다. `observedBatchGaps`는 늦은 도착으로 메워질 수 있는 관측 공백이며 확정 패킷 손실률이 아니다. RELIABLE을 골라도 앞단 MQTTS QoS 0과 CSE 쓰기 실패까지 무손실이 되지는 않는다.
+
+### IPE 권한과 실행
+
+연안 `core.json`의 `dds_ipe_enabled=true`일 때 bootstrap이 `ddsIpe` AE와 `vibration`·`status` CNT 및 각각의 ACP를 만든다. 실행 IPE는 `CAnchorDDSIPE`로 조회·검색하고 두 CNT에 **CIN(4)만 생성**한다. ACP 수정, SUB 생성, 명령·기존 anchor 저널 접근은 허용하지 않는다. Dashboard와 Edge core는 조회·검색만 한다. 기존 CSE에서는 `./deploy/edge/run.sh bootstrap`을 다시 실행해야 한다. 설정을 끄더라도 기존 리소스·ACP를 자동 삭제하지 않는다.
+
+1. 선박·연안에 기존 core 환경과 TLS 파일을 준비하고 `scripts/install-dds.sh`를 실행한다. Pi/Linux ARM에서는 고정 Cyclone DDS C 소스를 빌드하므로 git·cmake·C/C++ 빌드 도구가 필요하다. 기본 venv는 `.venv`; 다른 환경은 `ANCHOR_VENV`로 지정한다. Python 3.11-3.13을 권장한다.
+2. `deploy/ship/dds.json`, `deploy/edge/dds.json`에서 `interface`를 **자기 호스트 IPv4**, `peers`를 **상대 호스트 IPv4 배열**로 맞춘다. 기본은 loopback이라 다른 호스트와 통신하지 않는다. 같은 domain/topic과 호환 QoS를 사용한다. 선박 `mqtt_host`는 인증서 SAN과 일치해야 한다.
+3. 시각을 동기화하고 기존 브로커·CSE를 실행한다. 연안 bootstrap 후 아래 명령을 각각 해당 호스트에서 실행한다.
+
+```bash
+# 선박
+./deploy/ship/run.sh dds-check
+./deploy/ship/run.sh dds
+# 연안
+./deploy/edge/run.sh bootstrap
+./deploy/edge/run.sh dds-check
+./deploy/edge/run.sh dds
+```
+
+`dds-check`는 설정 검사이며 통신 성공 검사가 아니다. 필요하면 `deploy/systemd/anchor-dds@.service`를 설치해 ship 또는 edge 인스턴스로 실행한다. ENGINE 펌웨어의 `ANCHOR_ENABLE_DDS_SOURCE=1`은 원본 묶음을 활성화하며 `0`으로 끌 수 있다. 원본 재전송 큐는 없다.
+
+연안 Linux 컨테이너에서는 `dds.container.json`의 interface/peers와 CSE 주소를 먼저 맞춘 뒤 `docker compose -f deploy/edge/compose.yaml --profile dds up -d --build edge-dds-ipe`로 실행한다. 이 서비스는 UDP discovery를 위해 host network를 사용하며 일반 core 컨테이너와 별도다. CSE bootstrap이 선행되어야 한다. ARM 네이티브 빌드·컨테이너 실행·실제 MEC 연동은 아직 미검증이다.
+
+**DDS Security는 활성화하지 않았다.** DDS 구간에는 TLS가 적용되지 않으므로 격리된 신뢰 네트워크 또는 인증·암호화 터널을 사용한다. HTTPS 쪽 ACP가 DDS 송신자를 인증해 주지는 않는다. MQTTS·HTTPS 보안은 그대로 유지한다. 시연은 진동 입력 → DDS 수신·sampleCount 증가 → CSE 파형 창 저장을 보여주고, 링크 단절 시 실시간 파형 중단과 기존 요약 저널의 복구를 구분한다. UDP의 지연·손실 이점은 동일 조건 비교 측정 전까지 성능 결과로 주장하지 않는다.
 
 ## ACP 최소 권한과 대시보드 연결
 
@@ -351,12 +413,14 @@ docker compose -f deploy/edge/compose.yaml up -d edge-app
 python -m pytest -q
 ANCHOR_HARDWARE_INTEGRATION=1 python -m pytest tests/test_hardware_acme.py -v
 ANCHOR_TLS_WIRE_INTEGRATION=1 python -m pytest tests/test_mqtt_tls_integration.py -v
+python -m pytest tests/test_dds.py -q
+ANCHOR_DDS_WIRE_INTEGRATION=1 python -m pytest tests/test_dds_wire_integration.py -v
 scripts/check-firmware.sh
 ```
 
 일반 테스트는 실제 센서 JSON 계약, 단절·재시작·중복·충돌·용량 제한·명령 결과 경계를 검사한다. 시나리오 단위 테스트는 CSE API 대역을 사용한다. MCU 시간 정책은 호스트 C++ 컴파일로 검사한다. 별도 ACME 통합 테스트는 임시 DB와 포트로 CSE 세 개를 실행한다. 결과 CIN fixture를 사용하는 부분은 실제 ESP32 시험과 구분했다.
 
-이번에는 Python 문법·JSON 설정과 테스트 135개 수집까지만 확인했다. **수집은 실행·통과를 뜻하지 않는다.** 사용자의 요청에 따라 ACP·토큰·재시도를 포함한 전체 기능 검증은 장비를 모두 켠 뒤 진행한다.
+현재 테스트는 163개다. **수집은 실행·통과를 뜻하지 않는다.** 이번 DDS 오프라인 검사는 26 passed / 1 skipped였고, 건너뛴 native QoS·CDR 검사는 Cyclone DDS 11.1.0을 설치한 별도 Python 3.12 환경에서 1 passed를 확인했다. IPE ACP는 고정 ACME의 권한 판정 코드를 호출했으며 실제 CSE 요청 시험과 구분한다. DDS UDP 두 프로세스 시험은 opt-in으로 준비했고 아직 실행하지 않았다. 사용자 요청에 따라 전체 기능·물리 통신 검증은 Pi 두 대와 연안 호스트를 켠 뒤 진행한다.
 
 이전 TLS 단계의 66 passed / 18 skipped는 이번 수정 이후 결과가 아니다. 당시 메모리 TLS 핸드셰이크·CA/SAN·클라이언트 인증서·역할별 묶음 분리를 검사했다. 실제 소켓 시험은 도구 환경의 포트 개설 제한과 Mosquitto 공유 라이브러리 누락으로 실행하지 못했다. 3-CSE HTTPS와 MQTTS 상·하향 시험 코드는 준비되어 있다. ESP32 전체 빌드·플래시와 실물 통신은 아직 미검증이다.
 
@@ -370,6 +434,7 @@ scripts/check-firmware.sh
 | `src/anchor/auth.py` | 운영자·상태 조회 토큰 분리, 모니터 응답에서 원본·위치 제외 |
 | `deploy/{ship,edge,shore}/` | 역할 고정 실행기·HTTPS 설정, 선박 MQTTS, 연안 컨테이너 |
 | `src/anchor/tls.py`, `acme_tls.py` | 인증서 검증·ACME TLS 호환 실행기 |
+| `src/anchor/dds/`, `deploy/{ship,edge}/dds.json` | native DDS publisher·IPE, QoS 6종, 파형 변환·최소 ACP |
 | `scripts/provision-tls.py`, `package-role.py` | 인증서 발급·역할별 배포 묶음 |
 | `src/anchor/lab/` | 이전 모의 구현 |
 

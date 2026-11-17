@@ -213,7 +213,7 @@ void loop() {
     }
   }
 
-  // 20 Hz live stream for the dashboard's 3D view (plain MQTT, not stored in the CSE)
+  // 20 Hz live stream for the dashboard's 3D view (MQTTS, not stored in the CSE)
   if (filtInit && now - tLive >= 50) {
     tLive = now;
     char buf[64];
