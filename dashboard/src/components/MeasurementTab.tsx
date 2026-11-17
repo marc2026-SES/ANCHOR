@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { EChart } from './EChart'
-import { commandStep, computeMetrics, fmtMs, isHeld, n, type Metrics } from '../lib/metrics'
+import { commandStep, computeMetrics, fmtMs, isHeld, n, type Drain, type Metrics } from '../lib/metrics'
 import { exportEvents, exportLinks } from '../lib/csv'
 import type { Run } from '../types'
 import { C, FONT, clock } from '../theme'
@@ -18,7 +18,13 @@ const delays = (run: Run, pick: (held: boolean, critical: boolean) => boolean) =
 
 function drains(m: Metrics, link: 'A' | 'B') {
   const ds = m.drains.filter(d => d.link === link && d.items > 0)
-  return ds.length ? ds.map(d => `${clock(d.up).slice(0, 5)} → ${fmtMs(d.drained)} (${n(d.items)})`).join(' · ') : '—'
+  if (!ds.length) return '—'
+  const one = (d: Drain) => `${clock(d.up).slice(0, 5)} → ${fmtMs(d.drained)} (${n(d.items)})`
+  if (ds.length <= 3) return ds.map(one).join(' · ')
+  // a flapping link (live run) gives many restores: first two, then the count and the longest drain
+  const done = ds.filter(d => d.drained !== null)
+  const longest = done.length ? done.reduce((a, b) => (b.drained! > a.drained! ? b : a)) : null
+  return `${ds.slice(0, 2).map(one).join(' · ')} · +${ds.length - 2} more` + (longest ? ` · longest ${one(longest)}` : '')
 }
 
 function incidentDelay(run: Run) {
@@ -28,13 +34,13 @@ function incidentDelay(run: Run) {
 }
 
 function commandResult(run: Run) {
-  const c = run.commands[0]
+  const c = run.commands[run.commands.length - 1]
   if (!c) return '—'
   const step = commandStep(c, run.end + 3_600_000)
   return step === 'applied' ? `applied · ${fmtMs(c.appliedAt! - c.issuedAt)} after issue` : step
 }
 
-export function MeasurementTab({ anchor, baseline }: { anchor: Run; baseline: Run }) {
+export function MeasurementTab({ anchor, baseline, note = 'demo run · full run · dummy data' }: { anchor: Run; baseline: Run; note?: string }) {
   const runs = [baseline, anchor]
   const m = useMemo(() => runs.map(r => computeMetrics(r.events, r.links, r.end + 600_000, r.mode)), [anchor, baseline])
 
@@ -77,7 +83,7 @@ export function MeasurementTab({ anchor, baseline }: { anchor: Run; baseline: Ru
     <div className="tab-body measurement">
       <div className="row two">
         <section className="panel">
-          <header className="panel-head"><h3>ANCHOR vs baseline</h3><span>demo run · full run · dummy data</span></header>
+          <header className="panel-head"><h3>ANCHOR vs baseline</h3><span>{note}</span></header>
           <table className="grid compare">
             <thead><tr><th>Metric</th><th>Baseline</th><th>ANCHOR</th><th>How it is computed</th></tr></thead>
             <tbody>
