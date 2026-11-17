@@ -136,4 +136,7 @@ def bootstrap(settings, client):
         client.update(client.root + '/anchor/reportingGroup', {'m2m:grp': {'mnm': 2, 'mid': members}})
         gp = resource_policy(admin, 'anchor/reportingGroup', [([core], 63)])
         assign_policy(admin, admin.root + '/anchor/reportingGroup', 'm2m:grp', gp, core)
+    if settings.dds_ipe_enabled:
+        from .dds.resources import provision
+        provision(client)
     return {'role': role, 'cse': client.root, 'origin': core, 'journals': list(JOURNALS)}

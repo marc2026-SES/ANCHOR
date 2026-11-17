@@ -1,0 +1,20 @@
+{
+  "mode": "publisher",
+  "core_config": "core.json",
+  "interface": "127.0.0.1",
+  "peers": ["127.0.0.1"],
+  "domain_id": 42,
+  "topic": "AnchorVibrationV1",
+  "mqtt_host": "ship.local",
+  "mqtt_port": 8883,
+  "qos": {
+    "reliability": "BEST_EFFORT",
+    "durability": "VOLATILE",
+    "history": "KEEP_LAST",
+    "depth": 20,
+    "deadline_ms": 300,
+    "lifespan_ms": 1500,
+    "liveliness": "AUTOMATIC",
+    "lease_ms": 2000
+  }
+}
