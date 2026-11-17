@@ -59,6 +59,8 @@ def main(argv=None):
         expected = {'ship': 'id-ship', 'edge': 'id-edge', 'shore': 'id-in'}[role]
         if parser.get('basic.config', 'cseID') != expected:
             raise ValueError('CSE identity does not match the selected role')
+        if not parser.getboolean('cse.security', 'enableACPChecks', fallback=False):
+            raise ValueError('CSE access control checks must be enabled')
         if not parser.getboolean('http.security', 'useTLS') or not parser.getboolean('http.security', 'verifyCertificate'):
             raise ValueError('CSE HTTPS and certificate verification are required')
         if parser.getboolean('mqtt', 'enable') and (not parser.getboolean('mqtt.security', 'useTLS') or

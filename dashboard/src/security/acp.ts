@@ -12,11 +12,13 @@ export const ACPS: AcpRow[] = [
   { name: 'acp-anchor-events', on: 'anchor/events', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }] },
   { name: 'acp-anchor-events', on: 'anchor/events', cse: 'coast',
-    grants: [{ who: 'CAnchorEdge', ops: 'all' }, { who: 'CAnchorShip', ops: 'C R Di' }] },
+    grants: [{ who: 'CAnchorEdge', ops: 'all' }, { who: 'CAnchorShip', ops: 'C R Di' }, { who: 'CAnchorDashboard (dashboard_edge_read)', ops: 'R Di' }] },
   { name: 'acp-anchor-events', on: 'anchor/events', cse: 'shore',
-    grants: [{ who: 'CAnchorShore', ops: 'all' }, { who: 'CAnchorEdge · CAnchorShip', ops: 'C R Di' }, { who: '★ CAnchorDashboard', ops: 'R Di' }] },
+    grants: [{ who: 'CAnchorShore', ops: 'all' }, { who: 'CAnchorEdge · CAnchorShip', ops: 'C R Di' }, { who: 'CAnchorDashboard', ops: 'R Di C(SUB)' }] },
   { name: 'acp-anchor-receipts · acp-anchor-commands', on: 'anchor/receipts · anchor/commands', cse: 'coast',
     grants: [{ who: 'CAnchorEdge', ops: 'all' }, { who: 'CAnchorShip', ops: 'R Di' }] },
+  { name: 'acp-anchor-commands', on: 'anchor/commands (optional monitor read)', cse: 'coast',
+    grants: [{ who: 'CAnchorDashboard (dashboard_edge_read)', ops: 'R Di' }] },
   { name: 'acp-anchor-receipts · acp-anchor-commands', on: 'anchor/receipts · anchor/commands', cse: 'shore',
     grants: [{ who: 'CAnchorShore', ops: 'all' }, { who: 'CAnchorEdge · CAnchorShip', ops: 'R Di' }, { who: '★ CAnchorDashboard', ops: 'R Di' }] },
   { name: 'acp-shipCommands · acp-edgeCommands', on: 'poller AE + pollingChannel (coast · shore)', cse: 'coast · shore',
@@ -26,7 +28,9 @@ export const ACPS: AcpRow[] = [
   { name: 'acp-bridge-position', on: 'bridge/position', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge', ops: 'C R U' }] },
   { name: 'acp-bridge-command · acp-engine-command', on: '<node>/command (reportingGroup members)', cse: 'ship',
-    grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine (own node)', ops: 'C R' }] },
+    grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine (own node)', ops: 'R C(SUB)' }] },
+  { name: 'acp-anchor-reportingGroup', on: 'anchor/reportingGroup', cse: 'ship',
+    grants: [{ who: 'CAnchorShip', ops: 'all' }] },
 ]
 
 /** Denied-request tests. Results stay "not run" until executed against the real CSEs. */
@@ -36,14 +40,21 @@ export const DENY_TESTS: { id: string; test: string; who: string; request: strin
   { id: 'T3', test: 'Node writes another node', who: 'CEngine', request: 'CREATE cin · ship cargo/climate', expect: '4103' },
   { id: 'T4', test: 'Node sends a command', who: 'CEngine', request: 'CREATE cin · ship bridge/command', expect: '4103' },
   { id: 'T5', test: 'Ship deletes a shore record', who: 'CAnchorShip', request: 'DELETE · shore anchor/events/<record>', expect: '4103' },
-  { id: 'T6', test: 'Coast rewrites a shore receipt', who: 'CAnchorEdge', request: 'UPDATE · shore anchor/receipts/<record>', expect: '4103' },
+  { id: 'T6', test: 'Coast updates the shore receipts container', who: 'CAnchorEdge', request: 'UPDATE · shore anchor/receipts', expect: '4103' },
   { id: 'T7', test: 'Control API without the token', who: 'any client', request: 'GET :8790/status', expect: '401' },
   { id: 'T8', test: 'Control: dashboard reads the shore journal', who: 'CAnchorDashboard', request: 'RETRIEVE shore anchor/events', expect: '2000' },
+  { id: 'T9', test: 'Dashboard forges a journal record', who: 'CAnchorDashboard', request: 'CREATE cin · shore anchor/events', expect: '4103' },
+  { id: 'T10', test: 'Dashboard subscribes without create permission', who: 'CAnchorDashboard', request: 'CREATE sub · shore anchor/receipts', expect: '4103' },
+  { id: 'T11', test: 'MQTTS without a client certificate', who: 'unverified client', request: 'TLS connect :8883', expect: 'TLS rejected' },
+  { id: 'T12', test: 'Control: dashboard subscribes to events', who: 'CAnchorDashboard', request: 'CREATE sub · shore anchor/events', expect: '2001' },
+  { id: 'T13', test: 'Device forges its own command', who: 'CBridge', request: 'CREATE cin · ship bridge/command', expect: '4103' },
+  { id: 'T14', test: 'Read-only token attempts a command', who: 'status token', request: 'POST :8790/commands', expect: '403' },
+  { id: 'T15', test: 'Application changes its own policy', who: 'CAnchorShore', request: 'UPDATE · shore acp-anchor-events', expect: '4103' },
 ]
 
 export const TRANSPORT: { hop: string; how: string; open?: boolean }[] = [
-  { hop: 'Control API (port 8790)', how: 'Bearer token from init-token, compared in constant time; never put in a URL or browser storage' },
-  { hop: 'CSE ↔ CSE, core → CSE (HTTP)', how: 'trusted LAN / VPN in the demo; HTTPS for untrusted networks (the core refuses to switch off CA verification)' },
-  { hop: 'ESP32 → ship CSE (MQTT)', how: 'Mosquitto allow_anonymous on the boat LAN (dev) · MQTT accounts and TLS still to add', open: true },
-  { hop: 'Ship position (privacy)', how: 'bridge/position has its own ACP without the dashboard identity · the control API still shows the latest value to token holders', open: true },
+  { hop: 'Control API (HTTPS 8790)', how: 'Operator token and a separate status-only token; the latter permits GET /status counters and excludes raw events, location and diagnostics' },
+  { hop: 'CSE ↔ CSE, core → CSE (HTTPS)', how: 'CA and hostname verification enabled; binding the authenticated caller to its Originator remains open', open: true },
+  { hop: 'ESP32 → ship CSE (MQTTS 8883)', how: 'Client certificates required, allow_anonymous=false; binding certificate identity to topics and Originator remains open', open: true },
+  { hop: 'Position and AI access', how: 'Ship dashboard cannot read position; shore dashboard can read location-containing events. AI has no journal grant. Do not pass dashboard credentials or raw events to an LLM.', open: true },
 ]

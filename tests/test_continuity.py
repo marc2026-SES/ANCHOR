@@ -4,6 +4,7 @@ import time
 import pytest
 
 from anchor.commands import dispatch, make
+from anchor.client import OneM2MError
 from anchor.config import Endpoint, ORIGINS, Settings
 from anchor.events import digest, record_name
 from anchor.runtime import Runtime
@@ -144,6 +145,46 @@ def test_expired_command_is_not_fanned_out(fleet):
     command = make({'commandId': 'expired'}, now=1)
     assert dispatch(ship.local, ship.journal, command, 100000, {}) == 'expired'
     assert not ship.local.cins('cse-ship/bridge/command')
+    assert not ship.local.cins('cse-ship/engine/command')
+
+
+def test_partial_fanout_top_level_conflict_retries_the_missing_member(fleet, monkeypatch):
+    ship, server = fleet[0]['ship'], fleet[1]['ship']
+    command = make({'commandId':'partial-fanout'}, now=1000)
+    create = ship.local.create
+    attempts = 0
+    def partial(parent, ty, body):
+        nonlocal attempts
+        if parent.endswith('/fopt'):
+            attempts += 1
+            if attempts == 1:
+                create(ship.local.root+'/bridge/command',ty,body)
+                raise OneM2MError(5000, {'error':'engine temporarily unavailable'}, parent)
+            raise OneM2MError(4105, {}, parent)
+        return create(parent,ty,body)
+    monkeypatch.setattr(ship.local,'create',partial)
+    with pytest.raises(OneM2MError):dispatch(ship.local,ship.journal,command,1001,{})
+    assert not ship.journal.get('dispatches',command['commandId'])
+    assert not server.client().cins('cse-ship/engine/command')
+    assert dispatch(ship.local,ship.journal,command,1002,{})=='dispatched'
+    assert dispatch(ship.local,ship.journal,command,1003,{})=='dispatched'
+    for device in ('bridge','engine'):
+        assert len(server.client().cins(f'cse-ship/{device}/command'))==1
+
+
+def test_fanout_conflict_does_not_accept_an_existing_different_command(fleet, monkeypatch):
+    ship=fleet[0]['ship']
+    command=make({'commandId':'same-id'},now=1000)
+    bad={**command,'intervalMs':400}
+    ship.local.put_record('cse-ship/bridge/command',record_name(command['commandId']),bad)
+    create=ship.local.create
+    def conflict(parent,ty,body):
+        if parent.endswith('/fopt'):raise OneM2MError(4105,{},parent)
+        return create(parent,ty,body)
+    monkeypatch.setattr(ship.local,'create',conflict)
+    with pytest.raises(ValueError,match='Conflicting'):
+        dispatch(ship.local,ship.journal,command,1001,{})
+    assert ship.journal.get('dispatches',command['commandId']) is None
     assert not ship.local.cins('cse-ship/engine/command')
 
 

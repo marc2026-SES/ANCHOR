@@ -5,6 +5,7 @@
   "port": 8790,
   "notify_url": "https://127.0.0.1:8790/notify",
   "token_file": "../../.runtime-shore/api-token",
+  "status_token_file": "../../.runtime-shore/status-token",
   "direct_shore": false,
   "scan_seconds": 2,
   "batch_size": 40,

@@ -8,7 +8,8 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDE = ('*.key', '*.pem', '*.crt', 'anchor_*_tls.h', 'anchor_config.h', 'ota.env',
-           '*.local.json', '*.local.ini', '.env', '*.db*', '*.sqlite*', '*.pyc', '.DS_Store', '._*')
+           '*.local.json', '*.local.ini', '.env', 'api-token', 'status-token', '*-status-token',
+           '*.db*', '*.sqlite*', '*.pyc', '.DS_Store', '._*')
 EXCLUDE_DIRS = {'__pycache__', 'data', 'logs', 'backups', 'build', 'lab'}
 
 

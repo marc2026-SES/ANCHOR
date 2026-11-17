@@ -56,6 +56,8 @@ A와 B는 독립된 연결이다. 각각 설정한 CSE에 직접 접근한다. �
 
 전체 리소스 트리는 로컬 통합 문서 `docs/ANCHOR_OVERVIEW.pdf`·`.md`의 **20절 통합본(선박 → 연안 → 육상) · 21절 선박 · 22절 연안 · 23절 육상**에 흰 바탕 도형으로 수록했다. 모든 리소스를 옆으로 나누지 않고 한 열로 내려 읽도록 배치했으며, 들여쓰기와 연결선으로 부모·자식 관계를 나타냈다. AE·CNT·CIN·SUB·PCH·GRP·FCNT·ACP와 가상 경로를 구분해 표시했다. **19절**에는 읽는 법, **24절**에는 ACP 연결·생성 시점·개수를 정리했다. 코드 근거는 `src/anchor/resources.py`, `runtime.py`, `commands.py`, 펌웨어 `AnchorNode.h`와 육상 `shore_server.py`다.
 
+통합 문서 **25절**은 이번 ACP·명령 재시도 수정, **26절**은 장비 전체 시험과 T1-T15, **27절**은 Shore Monitor 연결·토큰 배치·baseline 준비 상태다.
+
 ## 하드웨어 통합
 
 센서 핀, I2C/GPS 드라이버, 자세 필터, 진동 계산, 카메라, 실시간 자세 화면, BRIDGE 영점 조정은 유지했다. 실시간 화면은 MQTTS로 연결하며, 기존 ArduinoOTA 코드는 남겨 두되 기본 비활성화했다. 기존 `bridge/attitude`, `engine/vibration` 등의 리소스 이름도 같다. 공통 통신 계층에 재부팅 ID, 재전송, 명령 중복 방지와 장치 결과를 추가했다.
@@ -90,7 +92,7 @@ A와 B는 독립된 연결이다. 각각 설정한 CSE에 직접 접근한다. �
 | 호스트 | 올릴 소스 묶음 | 실행할 프로세스 | 실행하지 않는 것 |
 |---|---|---|---|
 | 선박 Pi 5 | `anchor-ship.tar.gz` | ship CSE, ship core, 센서·카메라 화면, Mosquitto, chrony | edge/shore CSE·core |
-| 연안 Pi / MEC Host | `anchor-edge.tar.gz` | edge CSE, edge core | 센서 드라이버·카메라·MQTT 브로커 |
+| 연안 MEC Host | `anchor-edge.tar.gz` | edge CSE, edge core | 센서 드라이버·카메라·MQTT 브로커 |
 | 육상 Pi 4 | `anchor-shore.tar.gz` | shore CSE, shore core, 육상 센서 화면 | 센서 직접 수집·MQTT 브로커 |
 
 ESP32 펌웨어는 개발 PC에서 빌드해 각 보드에 올린다. 선박 Pi가 ESP32 센서 코드를 실행하는 것은 아니다. 육상은 자기 CSE에 도착한 기록으로 관제하고, 카메라만 선박의 HTTPS 스트림을 중계한다.
@@ -119,7 +121,53 @@ scripts/export-source.sh shore "$PWD/.runtime-packages/anchor-shore.tar.gz"
 
 8080은 그대로 쓰되 HTTPS로 접속한다. 인증서가 없거나 신뢰 검증에 실패하면 연결을 중지한다. HTTP/MQTT로 자동 우회하지 않는다. HTTP 리다이렉트도 따라가지 않는다. NTP·mDNS는 시각 동기화·주소 검색용으로 남으며, ArduinoOTA는 기본 비활성화하고 USB로 펌웨어를 올린다.
 
-MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. 기존 ACP 검사는 유지했다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator를 묶는 세부 권한 정책, HTTPS 호출자 인증 강화, 기존 센서 화면의 운영자 권한은 다음 ACP 단계의 대상이다. TLS 적용만으로 모든 사용자의 데이터 접근 권한까지 완성된 것은 아니다. DDS는 아직 추가하지 않았다.
+MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. ACP는 자원별로 분리했고 센서 화면은 `CAnchorDashboard`로 읽는다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator 연결과 HTTPS 호출자 신원 연결은 아직 남아 있다. TLS만으로 Originator 사칭이 차단되지는 않는다. DDS는 아직 추가하지 않았다.
+
+## ACP 최소 권한과 대시보드 연결
+
+ACP 이름은 `acp-<자원 경로에서 /를 -로 바꾼 값>`이다. 예: `acp-anchor-events`, `acp-bridge-position`. 모든 ACP는 CSEBase 직속이고, 보호 대상의 `acpi`가 참조한다. `pvs`는 `CAdmin`만 허용하며 `CAdmin`은 bootstrap에만 사용한다. CSE 실행 설정의 `enableACPChecks=true`가 필요하고 `run.sh cse`는 이 검사가 꺼져 있으면 실행을 거부한다. bootstrap이 실행 중인 CSE의 검사 설정 자체를 켜는 것은 아니다.
+
+| 주체·자원 | 허용 |
+|---|---|
+| 각 core → 자기 `anchor`와 저널 | 기존 전체 권한 유지 |
+| 선박 → 연안·육상 `anchor/events`, 연안 → 육상 `anchor/events` | C·R·Di(35); 삭제·수정 불가 |
+| 하위 core → 상위 `receipts`·`commands` | R·Di(34) |
+| 육상 Dashboard → `events`·`receipts`·`commands` | R·Di(34) |
+| 육상 Dashboard → `events` 아래 자식 생성 | SUB(23)만: `acop=1`, `acod=[{"chty":[23]}]`; CIN 생성 불가 |
+| 연안 Dashboard → `events`·`commands` | `dashboard_edge_read=true`일 때 R·Di(34). 연안 설정은 기본 활성화; receipts·SUB는 허용하지 않음 |
+| BRIDGE·ENGINE → 자기 `command` | R(2) + SUB만 C. 이 장치 명령 CNT에 CIN을 기록하는 주체는 선박 core |
+| 선박 Dashboard → 센서 | R(2), `bridge/position` 제외 |
+| 선박 core → `anchor/reportingGroup` | `acp-anchor-reportingGroup`으로 전체 권한; 다른 앱은 그룹 제어 불가 |
+| AI 에이전트 | 저널 권한 미부여. 이름·위치 제거 인터페이스 합의 전까지 허용하지 않음 |
+
+센서·명령 결과·SDT FCNT에도 자원마다 별도 ACP를 둔다. 초안의 장치 `command`에 대한 일반 C·R(3)은 장치가 명령 CIN을 직접 만들 수 있어 **R + SUB 전용 C**로 좁혔다. `acod/chty`는 생성할 자식 종류를 제한하는 조건이다. [oneM2M TS-0001 9.6.2.4](https://www.onem2m.org/images/files/deliverables/Release2A/TS-0001-Functional_Architecture-v_2_18_1.pdf)
+
+명령의 최초 발행은 육상 운영자 API에서 한다. 육상 core가 `anchor/commands`에 저장하고, 연안을 거쳐 선박 core가 `bridge/command`·`engine/command`에 기록한다. 장치는 명령을 수신·실행하고 자기 `commandResults`에 결과를 쓴다. 장치의 명령 CIN 생성 제한은 육상 명령 발행이나 장치의 수신·실행·결과 보고를 막는 것이 아니다.
+
+기존 CSE는 DB·설정을 백업하고 세 역할에서 `bootstrap`을 다시 실행한다. 새 ACP를 생성한 뒤 AE·CNT·FCNT·GRP의 `acpi`를 갱신하며, 기존 CIN과 관측 온도는 유지한다. 옛 이름 ACP는 자동 삭제하지 않는다. 사용 중인 참조가 없는지 확인한 뒤 정리한다. 육상 하드웨어 화면은 Dashboard 소유의 `sub-shore-dash-reader`를 사용하며, 기존 core 소유 `sub-shore-dash`도 자동 삭제하지 않는다.
+
+육상 `anchor/events`에는 위치 이벤트도 있으므로 Dashboard의 저널 조회 권한에는 위치 조회도 포함된다. 이 신원이나 운영자 토큰을 AI에 공유하지 않는다. 위치 제거를 저널 수준으로 분리할지 AI 전용 API로 제공할지는 별도 합의가 필요하다.
+
+## Shore Monitor 주소와 읽기 전용 토큰
+
+아래는 **배포 기본 주소**이며 실제 IP·DNS·인증서 SAN·접속 성공을 확인한 값은 아니다. 연안은 MEC Host에 배포하고, 임시 시험에서는 맥이 같은 edge 역할을 맡는다.
+
+| 연결 | 주소 / 자격 |
+|---|---|
+| 육상 CSE | `https://shore.local:8080/~/id-in/cse-in`, Originator `CAnchorDashboard` |
+| 연안 CSE(저장 시각 조회) | `https://edge.local:8080/~/id-edge/cse-edge`, 같은 Dashboard 신원 |
+| 선박 core 상태 | `https://ship.local:8790/status`, 선박 status 토큰 |
+| 연안 core 상태 | `https://edge.local:8790/status`, 연안 status 토큰 |
+
+운영자 `api-token` 대신 `.runtime-<role>/status-token`을 Monitor에 전달한다. `status_token_file` 설정으로 로드하며 `GET /status`만 허용한다. 반환 내용은 role·ready·scan 시각·전달 수·순번 공백·연결 상태·PCH/SUB 횟수다. `latest`·사건/명령 원문·진단 오류 본문은 반환하지 않는다. `/commands`, `/incidents/ack`, `/batches`는 이 토큰으로 호출하면 403이다. 토큰을 안 보내거나 잘못 보내면 401이다. 운영자 토큰은 기존 제어 기능을 유지한다.
+
+신규 설치 또는 기존 설정에 `status_token_file`을 추가할 때, 각 역할에서 `./deploy/<role>/run.sh init-status-token`을 최초 한 번 실행하고 core를 다시 시작한다. 이미 전달받은 토큰 파일을 설치했다면 다시 생성하지 않는다. 기존 파일은 덮어쓰지 않는다. 파일은 실행 사용자 소유·권한 600으로 배치하고 로그·채팅·브라우저 저장소에 넣지 않는다. MEC 컨테이너는 `/secrets/status-token`을 읽는다. 양쪽에 같은 파일을 배치하기 전에는 새 토큰이 실행 중인 core에 적용된 것으로 간주하지 않는다.
+
+개발 작업공간에는 전달용 `.runtime-handoff/shore-monitor/ship-status-token`, `edge-status-token`, `connections.json`을 별도로 준비했다. 이 폴더는 Git과 소스 묶음에 포함하지 않는다. 실제 호스트 주소는 연결 전에 확인해야 한다.
+
+현재 이 체크아웃의 `dashboard/`는 더미 데이터 UI다. 팀원이 별도로 완성한 Shore Monitor에는 위 주소·읽기 전용 토큰과 배포 CA 파일을 연결한다. CA 검증을 끄지 않는다. 현재 추적 중인 파일에는 `anchor-korea-strait.json`과 `Integration_API.md`가 없어 해당 파일의 평문 비밀번호 제거·회전은 확인하지 못했다. 로컬 런타임과 토큰은 Git·역할별 소스 묶음에서 제외한다.
+
+## 인증서 준비와 주소 설정
 
 MQTT 인증서 설정은 [Mosquitto 공식 설명](https://mosquitto.org/man/mosquitto-conf-5.html), ESP32의 주소·인증서 이름 분리는 [Arduino-ESP32 3.3.0 API](https://github.com/espressif/arduino-esp32/blob/3.3.0/libraries/NetworkClientSecure/src/NetworkClientSecure.h)를 기준으로 구현했다.
 
@@ -183,19 +231,21 @@ cd /opt/anchor
 ./deploy/ship/run.sh check
 ./deploy/ship/run.sh init-cse     # 신규 설치만
 ./deploy/ship/run.sh init-token   # 최초 1회, 기존 토큰은 덮어쓰지 않음
+./deploy/ship/run.sh init-status-token  # 최초 1회; 전달받은 파일을 설치했다면 생략
 ./deploy/ship/run.sh cse          # 터미널 1
 ./deploy/ship/run.sh bootstrap    # 터미널 2: CSE 준비 후
 ./deploy/ship/run.sh core         # 터미널 2
 ./deploy/ship/run.sh dashboard    # 터미널 3: picamera2 시스템 Python
 ```
 
-연안 Pi / MEC Host:
+연안 MEC Host:
 
 ```bash
 cd /opt/anchor
 ./deploy/edge/run.sh check
 ./deploy/edge/run.sh init-cse
 ./deploy/edge/run.sh init-token
+./deploy/edge/run.sh init-status-token  # 최초 1회; 전달받은 파일을 설치했다면 생략
 ./deploy/edge/run.sh cse          # 터미널 1
 ./deploy/edge/run.sh bootstrap    # 터미널 2
 ./deploy/edge/run.sh core         # 터미널 2
@@ -208,6 +258,7 @@ cd /opt/anchor
 ./deploy/shore/run.sh check
 ./deploy/shore/run.sh init-cse
 ./deploy/shore/run.sh init-token
+./deploy/shore/run.sh init-status-token  # 최초 1회; 전달받은 파일을 설치했다면 생략
 ./deploy/shore/run.sh cse         # 터미널 1
 ./deploy/shore/run.sh bootstrap   # 터미널 2
 ./deploy/shore/run.sh core        # 터미널 2
@@ -223,7 +274,7 @@ sudo cp deploy/systemd/anchor-*.service /etc/systemd/system/
 sudo systemctl daemon-reload
 # 선박 Pi
 sudo systemctl enable --now anchor-cse@ship anchor-core@ship anchor-dashboard@ship
-# 연안 Pi (Docker를 쓸 때는 이 줄을 실행하지 않음)
+# 연안 Linux 호스트의 네이티브 실행 선택지 (Docker와 동시 실행 금지)
 sudo systemctl enable --now anchor-cse@edge anchor-core@edge
 # 육상 Pi
 sudo systemctl enable --now anchor-cse@shore anchor-core@shore anchor-dashboard@shore
@@ -235,6 +286,7 @@ Linux 연안 호스트에서만 `deploy/edge/compose.yaml`을 사용한다. 연�
 
 ```bash
 ./deploy/edge/run.sh init-token   # 아직 토큰이 없을 때만
+./deploy/edge/run.sh init-status-token  # 최초 1회; 전달받은 파일을 설치했다면 생략
 export ANCHOR_UID="$(id -u)" ANCHOR_GID="$(id -g)"
 docker compose -f deploy/edge/compose.yaml build
 docker compose -f deploy/edge/compose.yaml up -d edge-cse
@@ -244,6 +296,33 @@ docker compose -f deploy/edge/compose.yaml up -d edge-app
 
 컨테이너는 `core.container.json`을 사용한다. 기본 Docker 네트워크 DNS는 호스트의 `.local` 이름을 보장하지 않으므로 실제 DNS를 구성하거나 compose에 `extra_hosts`를 지정한다. CSE 데이터는 `edge-cse-data`에 저장한다. 이전 볼륨을 재사용하면 UID/GID 권한을 먼저 확인한다. `down -v`는 DB 볼륨을 삭제하므로 정상 재시작에 사용하지 않는다. Docker compose 구성 검사는 통과했지만 컨테이너 빌드·실행과 MEC Mp1 등록·Sandbox 연동은 미검증이다.
 
+
+## Pi 두 대와 임시 연안 맥으로 전체 시험
+
+실제 배포는 **선박 Pi → 연안 MEC Host → 육상 Pi**다. MEC 준비 전에는 맥에서 edge CSE·core를 네이티브로 실행해 같은 세 역할을 구성한다. 맥에 선박·육상 CSE까지 중복으로 띄우지 않는다. Linux용 `network_mode: host` Compose를 맥에서 그대로 동작한다고 가정하지 않는다.
+
+맥에서도 Python 3.11+·git·openssl과 고정 ACME 환경을 준비한 뒤 `deploy/edge/run.sh`를 사용한다. 이미 설치된 가상환경이 있다면 `ANCHOR_VENV`로 경로를 지정한다. 맥의 IP가 `edge.local`로, 두 Pi는 `ship.local`·`shore.local`로 해석되게 세 장비의 DNS/hosts와 인증서 SAN을 맞춘다. ETSI MEC 플랫폼 등록은 이 임시 시험의 검증 범위가 아니다.
+
+기동 순서는 육상 CSE → 연안 CSE → 선박 CSE → 각 bootstrap → 각 core → ESP32·대시보드다. 새 ACP와 토큰 설정을 적용한 뒤 다음 순서로 기록한다.
+
+| 순서 | 시험 | 통과 근거 |
+|---|---|---|
+| 1 | DNS·시각·TLS·CSE 신원 | 세 CSE HTTPS 연결, 잘못된 CA/호스트명 거부, 시각 동기화 |
+| 2 | 정상 수집·SDT·화면 | 6개 센서 원본 CIN → events → 육상 동일 eventId·해시, 유효 온도만 FCNT 갱신 |
+| 3 | 링크 A 단절 | ESP32↔선박 내부 연결 유지, 선박 원본·사건 기록 증가, 육상 완료로 표시되지 않음 |
+| 4 | A만 복구·B 단절 | 연안 custody, 육상 final 미확인; 이어 A 단절·B만 복구하면 연안 데이터가 육상 도착 |
+| 5 | 재시작·중복·용량 | core/연안 CSE 재시작 후 복구, 같은 ID 중복 증가 없음, 충돌 격리, 가득 차면 기록 유실 대신 backpressure |
+| 6 | 명령 전체 경로 | 육상 원문 → 연안 캐시 → PCH → 선박 GRP → BRIDGE·ENGINE 실제 결과; 한 노드만 먼저 저장된 재시도·TTL·중복도 확인 |
+| 7 | ACP·API 권한 | T1-T15: Dashboard 조회·events SUB만 허용, CIN 쓰기/타 장치/ACP 변경·읽기 토큰 제어 거부 |
+| 8 | 실제 하드웨어 | ESP32 재부팅 bootId·seq, 센서 품질·장치 적용 주기, MQTTS 상·하향, 카메라·20 Hz 화면 |
+
+단위/계약 검사, 임시 DB의 3-CSE 통합 검사, 실제 3개 장비 시험 결과는 구분해서 기록한다. 아래 pytest의 3-CSE 시험은 한 호스트의 임시 CSE를 사용하므로 Pi·MEC 간 물리 통신 성공을 대신하지 않는다. 실제 장비에서는 배치 ID, eventId, 해시, CIN ct, 명령 결과와 로그를 함께 저장한다. 강제 전원 차단 내구성은 프로세스 재시작과 다른 시험이다.
+
+## 수조 비교 시험의 baseline
+
+비교 기준은 같은 센서·전송 간격·TLS·선박→연안→육상 경로에서 **단절 중 데이터의 보관 후 재전송·재시작 복구를 하지 않는 실시간 전달**로 잡는다. ANCHOR와 baseline에 같은 A/B 단절 시간표·측정 구간을 적용하고, 선박 원본 CIN/bootId·seq로 분모를 고정해 육상 수신율·지연·복구 시간을 비교한다. 원본은 비교 근거로 남겨도 baseline 전달기가 그 과거 기록을 복구 전송하면 안 된다.
+
+**현재 실제 장비용 baseline 전달기는 없다.** `dashboard/`의 Baseline 전환은 더미 데이터 비교이고, `direct_shore=true`도 보관·재시도 기능이 남아 있어 무보관 baseline이 아니다. 수조 baseline 실행 전에는 위 조건의 별도 전달기를 준비해야 하며, 현재 UI 전환 결과를 실측 결과로 사용하지 않는다. 이번 수정은 ACP·모니터 권한·명령 재시도를 대상으로 했고 baseline 전달기를 추가한 것으로 표시하지 않는다.
 
 ## 촬영 순서
 
@@ -277,7 +356,9 @@ scripts/check-firmware.sh
 
 일반 테스트는 실제 센서 JSON 계약, 단절·재시작·중복·충돌·용량 제한·명령 결과 경계를 검사한다. 시나리오 단위 테스트는 CSE API 대역을 사용한다. MCU 시간 정책은 호스트 C++ 컴파일로 검사한다. 별도 ACME 통합 테스트는 임시 DB와 포트로 CSE 세 개를 실행한다. 결과 CIN fixture를 사용하는 부분은 실제 ESP32 시험과 구분했다.
 
-현재 자동 테스트는 66 passed / 18 skipped다. 실제 인증서로 TLS MemoryBIO 핸드셰이크, 정상 CA/SAN, 잘못된 CA/호스트명 거부, MQTT 클라이언트 인증서 필수, 역할별 묶음 분리와 비밀키 제외를 검사했다. 3-CSE 테스트는 HTTPS로 전환했고 MQTTS 상·하향 통합 테스트를 추가했다. 이 환경에서는 포트 개설이 차단되고 Mosquitto 실행 파일의 공유 라이브러리가 누락되어 실제 소켓 시험을 실행하지 못했다. ESP32 툴체인도 없어 전체 펌웨어 빌드와 실물 시연은 미검증이다. TLS 메모리 시험 통과는 실제 Pi 통신 성공을 뜻하지 않는다.
+이번에는 Python 문법·JSON 설정과 테스트 135개 수집까지만 확인했다. **수집은 실행·통과를 뜻하지 않는다.** 사용자의 요청에 따라 ACP·토큰·재시도를 포함한 전체 기능 검증은 장비를 모두 켠 뒤 진행한다.
+
+이전 TLS 단계의 66 passed / 18 skipped는 이번 수정 이후 결과가 아니다. 당시 메모리 TLS 핸드셰이크·CA/SAN·클라이언트 인증서·역할별 묶음 분리를 검사했다. 실제 소켓 시험은 도구 환경의 포트 개설 제한과 Mosquitto 공유 라이브러리 누락으로 실행하지 못했다. 3-CSE HTTPS와 MQTTS 상·하향 시험 코드는 준비되어 있다. ESP32 전체 빌드·플래시와 실물 통신은 아직 미검증이다.
 
 | 경로 | 역할 |
 |---|---|
@@ -286,6 +367,7 @@ scripts/check-firmware.sh
 | `src/anchor/runtime.py`, `store.py` | 역할 분리, CSE 보관·전달·확인서 |
 | `src/anchor/commands.py`, `resources.py` | 실제 명령, PCH/GRP/SUB/ACP/SDT |
 | `src/anchor/service.py`, `dashboard.html` | 세 위치 관제 API·화면 |
+| `src/anchor/auth.py` | 운영자·상태 조회 토큰 분리, 모니터 응답에서 원본·위치 제외 |
 | `deploy/{ship,edge,shore}/` | 역할 고정 실행기·HTTPS 설정, 선박 MQTTS, 연안 컨테이너 |
 | `src/anchor/tls.py`, `acme_tls.py` | 인증서 검증·ACME TLS 호환 실행기 |
 | `scripts/provision-tls.py`, `package-role.py` | 인증서 발급·역할별 배포 묶음 |

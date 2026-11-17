@@ -5,6 +5,8 @@
   "port": 8790,
   "notify_url": "https://127.0.0.1:8790/notify",
   "token_file": "/secrets/api-token",
+  "status_token_file": "/secrets/status-token",
+  "dashboard_edge_read": true,
   "direct_shore": false,
   "scan_seconds": 2,
   "batch_size": 40,

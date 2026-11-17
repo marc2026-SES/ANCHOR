@@ -32,7 +32,7 @@ PORT = 8090
 NOTIFY_PORT = 8091
 CSE_HOST = ("127.0.0.1", 8080)
 EVENTS_PATH = "/~/id-in/cse-in/anchor/events"
-ORIG = "CAnchorShore"  # provisioned by the integrated core; local operator view
+ORIG = "CAnchorDashboard"  # reader identity; never borrow the shore core's authority
 SHIP_CAMERA = os.environ.get("ANCHOR_SHIP_CAMERA", "https://ship.local:8090/stream.mjpg")
 CONTAINERS = [
     "bridge/attitude", "bridge/position",
@@ -40,7 +40,7 @@ CONTAINERS = [
     "cargo/climate", "cargo/hatch",
     "sync/link",
 ]
-SUB_RN = "sub-shore-dash"
+SUB_RN = "sub-shore-dash-reader"  # new owner; preserve the legacy core-owned SUB
 SERIES = {  # chart key -> (container, field)
     "roll": ("bridge/attitude", "roll"), "pitch": ("bridge/attitude", "pitch"),
     "vib": ("engine/vibration", "vib_rms_g"), "gas": ("engine/gas", "mq2_v"),
@@ -247,7 +247,7 @@ def sub_maintenance():
             load_history()  # recover chart points after a lost notification
         except (OSError, ValueError) as exc:
             log("shore CSE:", exc)
-        time.sleep(30)
+        time.sleep(2)
 
 
 class NotifyHandler(server.BaseHTTPRequestHandler):

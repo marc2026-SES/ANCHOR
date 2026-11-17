@@ -2,7 +2,7 @@
 import time
 import uuid
 
-from .client import canonical, resource
+from .client import OneM2MError, canonical, resource
 from .events import digest, record_name
 
 
@@ -54,11 +54,18 @@ def dispatch(client, journal, command, now_ms, results):
         return 'not-yet-valid'
     name = record_name(command_id)
     if command['target'] == 'reportingGroup':
-        response = client.create(client.root + '/anchor/reportingGroup/fopt', 4,
-                                 {'m2m:cin': {'rn': name, 'cnf': 'application/json:0', 'con': canonical(command)}})
-        replies = response.get('m2m:agr', {}).get('m2m:rsp', [])
-        if len(replies) != len(targets(command)) or any(r.get('rsc') not in (2001, 4105) for r in replies):
-            raise RuntimeError(f'Incomplete group fanout: {response}')
+        try:
+            response = client.create(client.root + '/anchor/reportingGroup/fopt', 4,
+                                     {'m2m:cin': {'rn': name, 'cnf': 'application/json:0', 'con': canonical(command)}})
+        except OneM2MError as exc:
+            # ACME can abort the whole fanout at a member that already has this CIN.
+            # Reconcile every member below, including comparing any existing body.
+            if exc.rsc != 4105:
+                raise
+        else:
+            replies = response.get('m2m:agr', {}).get('m2m:rsp', [])
+            if len(replies) != len(targets(command)) or any(r.get('rsc') not in (2001, 4105) for r in replies):
+                raise RuntimeError(f'Incomplete group fanout: {response}')
     for device in targets(command):
         parent = client.root + '/' + device + '/command'
         client.put_record(parent, name, command)  # compare even after fanout 4105

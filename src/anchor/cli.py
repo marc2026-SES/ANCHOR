@@ -13,7 +13,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='ANCHOR real hardware: ship / coastal edge / shore')
     parser.add_argument('--config', required=True, help='deploy/<ship|edge|shore>/core.json')
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('serve', 'bootstrap', 'status', 'init-token'):
+    for name in ('serve', 'bootstrap', 'status', 'init-token', 'init-status-token'):
         sub.add_parser(name)
     command = sub.add_parser('command')
     command.add_argument('--target', choices=('bridge', 'engine', 'reportingGroup'), default='reportingGroup')
@@ -34,13 +34,16 @@ def main(argv=None):
     if args.command == 'bootstrap':
         from .runtime import Runtime
         result = Runtime(settings).provision()
-    elif args.command == 'init-token':
-        target = Path(settings.token_file)
+    elif args.command in ('init-token', 'init-status-token'):
+        filename = settings.status_token_file if args.command == 'init-status-token' else settings.token_file
+        if not filename:
+            raise ValueError('Set status_token_file in the role config before initializing a status token')
+        target = Path(filename)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, 'w') as handle:
             handle.write(secrets.token_urlsafe(32) + '\n')
-        result = {'tokenFile': str(target)}
+        result = {'tokenFile': str(target), 'scope': 'status' if args.command == 'init-status-token' else 'operator'}
     else:
         path, body = '/status', None
         if args.command == 'command':
@@ -57,11 +60,15 @@ def main(argv=None):
             from urllib.parse import quote
             path = '/batches/' + quote(args.batch_id, safe='')
         host = '127.0.0.1' if settings.bind == '0.0.0.0' else settings.bind
+        from .auth import read_token
+        # The local operator CLI keeps its full status view. External monitors
+        # receive only status_token_file and use the restricted API response.
+        token_file = settings.token_file
         with requests.Session() as session:
             session.trust_env = False
             response = session.request('POST' if body is not None else 'GET', f'https://{host}:{settings.port}{path}',
                                        json=body, timeout=15, verify=settings.tls_ca, allow_redirects=False,
-                                       headers={'Authorization': 'Bearer ' + Path(settings.token_file).read_text().strip()})
+                                       headers={'Authorization': 'Bearer ' + read_token(token_file)})
             if 300 <= response.status_code < 400:
                 raise ValueError('API redirects are disabled')
             response.raise_for_status()
