@@ -26,9 +26,9 @@ CA, CERT, KEY = host_tls_files()
 
 PORT = 8090
 CSE = "https://127.0.0.1:8080/~/id-ship/cse-ship"
-HEADERS = {"X-M2M-Origin": "CAnchorShip", "X-M2M-RVI": "3", "Accept": "application/json"}
+HEADERS = {"X-M2M-Origin": "CAnchorDashboard", "X-M2M-RVI": "3", "Accept": "application/json"}
 CONTAINERS = [
-    "bridge/attitude", "bridge/position",
+    "bridge/attitude",  # position remains restricted to BRIDGE and ship core
     "engine/vibration", "engine/gas",
     "cargo/climate", "cargo/hatch",
 ]
@@ -181,7 +181,7 @@ class Handler(server.BaseHTTPRequestHandler):
 
 
 class LiveFeed:
-    """Fast path: relays plain-MQTT telemetry (anchor/live/#, 20 Hz attitude) to browsers via SSE.
+    """Fast path: relays MQTTS telemetry (anchor/live/#, 20 Hz attitude) to browsers via SSE.
     Uses the mosquitto_sub CLI so the system python needs no MQTT library."""
 
     def __init__(self):

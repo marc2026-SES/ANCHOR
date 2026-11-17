@@ -16,11 +16,24 @@ def ae(admin, name, origin, reachable=False):
 
 
 def policy(admin, name, grants):
-    value = {'pv': {'acr': [{'acor': origins, 'acop': ops} for origins, ops in grants]},
+    rules = []
+    for origins, ops, *conditions in grants:
+        rule = {'acor': origins, 'acop': ops}
+        if conditions:
+            if len(conditions) != 1 or not conditions[0]:
+                raise ValueError('Conditional grants require nonempty acod')
+            rule['acod'] = conditions[0]
+        rules.append(rule)
+    value = {'pv': {'acr': rules},
              'pvs': {'acr': [{'acor': ['CAdmin'], 'acop': 63}]}}
     result = resource(admin.ensure(admin.root, 1, {'m2m:acp': {'rn': name, **value}}))
     admin.update(admin.root + '/' + name, {'m2m:acp': value})
     return result['ri']
+
+
+def resource_policy(admin, path, grants):
+    """One named policy per protected resource, relative to this CSEBase."""
+    return policy(admin, 'acp-' + path.replace('/', '-'), grants)
 
 
 def assign_policy(admin, path, tag, acpi, owner):
@@ -60,7 +73,7 @@ def bootstrap(settings, client):
         if other != role:
             ae(admin, 'peer-' + other, origin)
     ae(admin, 'dashboard', 'CAnchorDashboard')
-    local_policy = policy(admin, 'anchor-local', [([core], 63)])
+    local_policy = resource_policy(admin, 'anchor', [([core], 63)])
     assign_policy(admin, admin.root + '/anchor', 'm2m:ae', local_policy, core)
     incoming = {'ship': [], 'edge': [ORIGINS['ship']], 'shore': [ORIGINS['edge'], ORIGINS['ship']]}[role]
     downstream = {'ship': [], 'edge': [ORIGINS['ship']], 'shore': [ORIGINS['edge'], ORIGINS['ship']]}[role]
@@ -70,12 +83,19 @@ def bootstrap(settings, client):
             grants.append((incoming, 35))
         if name in ('receipts', 'commands') and downstream:
             grants.append((downstream, 34))
-        p = policy(admin, 'anchor-' + name, grants)
+        if role == 'shore' and name in ('events', 'receipts', 'commands'):
+            grants.append((['CAnchorDashboard'], 34))
+            if name == 'events':
+                # A reader may subscribe, but may never forge a journal CIN.
+                grants.append((['CAnchorDashboard'], 1, [{'chty': [23]}]))
+        if role == 'edge' and settings.dashboard_edge_read and name in ('events', 'commands'):
+            grants.append((['CAnchorDashboard'], 34))
+        p = resource_policy(admin, 'anchor/' + name, grants)
         container(admin, admin.root + '/anchor', name, p)
     if role in POLLERS:
         name, origin = POLLERS[role]
         ae(admin, name, origin)
-        p = policy(admin, 'anchor-poll', [([core, origin], 63)])
+        p = resource_policy(admin, name, [([core, origin], 63)])
         assign_policy(admin, admin.root + '/' + name, 'm2m:ae', p, origin)
         admin.as_origin(origin).ensure(admin.root + '/' + name, 15,
                                       {'m2m:pch': {'rn': 'pch', 'rqag': True}})
@@ -83,22 +103,29 @@ def bootstrap(settings, client):
         members = []
         for device, origin in DEVICES.items():
             ae(admin, device, origin)
-            p = policy(admin, 'sensor-' + device, [([core], 63), ([origin], 7), (['CAnchorDashboard'], 2)])
+            sensor_grants = [([core], 63), ([origin], 7), (['CAnchorDashboard'], 2)]
+            p = resource_policy(admin, device, sensor_grants)
             assign_policy(admin, admin.root + '/' + device, 'm2m:ae', p, origin)
             admin.update(admin.root + '/' + device, {'m2m:ae': {'lbl': ['anchor:hardware', 'device:' + device]}})
             for sensor in SENSORS[device]:
                 # Location is kept separate from the public sensor dashboard identity.
-                sensor_policy = p if sensor != 'position' else policy(admin, 'sensor-location', [([core], 63), ([origin], 7)])
+                grants = sensor_grants if sensor != 'position' else [([core], 63), ([origin], 7)]
+                sensor_policy = resource_policy(admin, device + '/' + sensor, grants)
                 container(admin, admin.root + '/' + device, sensor, sensor_policy,
                           ['anchor:sensor', 'device:' + device, 'sensor:' + sensor], owner=origin)
             if device == 'cargo':
+                temperature_policy = resource_policy(admin, 'cargo/temperature', sensor_grants)
                 admin.ensure(admin.root + '/cargo', 28, {'cod:tempe': {
                     'rn': 'temperature', 'cnd': 'org.onem2m.common.moduleclass.temperature',
-                    'curT0': 0.0, 'acpi': [p], 'lbl': ['anchor:sdt', 'quality:unobserved']}})
+                    'curT0': 0.0, 'acpi': [temperature_policy], 'lbl': ['anchor:sdt', 'quality:unobserved']}})
+                # Also migrate an existing FCNT without resetting its observed value.
+                assign_policy(admin, admin.root + '/cargo/temperature', 'cod:tempe', temperature_policy, 'CAdmin')
             if device in ('bridge', 'engine'):
-                cp = policy(admin, 'command-' + device, [([core], 63), ([origin], 3)])
+                cp = resource_policy(admin, device + '/command',
+                                     [([core], 63), ([origin], 2), ([origin], 1, [{'chty': [23]}])])
                 cmd = container(admin, admin.root + '/' + device, 'command', cp, owner=origin)
-                container(admin, admin.root + '/' + device, 'commandResults', p,
+                rp = resource_policy(admin, device + '/commandResults', sensor_grants)
+                container(admin, admin.root + '/' + device, 'commandResults', rp,
                           ['anchor:sensor', 'device:' + device, 'sensor:commandResults'], owner=origin)
                 members.append(cmd['ri'])
         group = {'mt': 3, 'mnm': 2, 'mid': members}
@@ -107,4 +134,6 @@ def bootstrap(settings, client):
             raise ValueError('reportingGroup must contain CNT members')
         # memberType is immutable (TS-0004 / ACME attribute policy ou=NP).
         client.update(client.root + '/anchor/reportingGroup', {'m2m:grp': {'mnm': 2, 'mid': members}})
+        gp = resource_policy(admin, 'anchor/reportingGroup', [([core], 63)])
+        assign_policy(admin, admin.root + '/anchor/reportingGroup', 'm2m:grp', gp, core)
     return {'role': role, 'cse': client.root, 'origin': core, 'journals': list(JOURNALS)}

@@ -76,6 +76,8 @@ serviceProviderID=//anchor.test
 [cse]
 enableRemoteCSE=false
 requestExpirationDelta=2
+[cse.security]
+enableACPChecks=true
 [resource.cnt]
 enableLimits=false
 [database.tinydb]
@@ -103,7 +105,8 @@ enable=false
             cfg.notify_url = f'https://127.0.0.1:{cfg.port}/notify'
             configs[role] = cfg
             runtime = Runtime(cfg)
-            server = make_server(runtime, 'test-token-with-at-least-24-characters')
+            server = make_server(runtime, 'test-token-with-at-least-24-characters',
+                                 'status-token-with-at-least-24-characters')
             threading.Thread(target=server.serve_forever, daemon=True).start()
             servers.append(server)
             runtime.provision()
@@ -261,3 +264,73 @@ def test_edge_pch_is_independent_of_shore(fleet):
         assert ship.pch_received >= 1
     finally:
         start('shore')
+
+
+@pytest.mark.parametrize('role,origin,path,method,ty,body', [
+    ('ship','CAnchorDashboard','bridge/attitude','POST',4,{'m2m:cin':{'con':'denied'}}),
+    ('ship','CAnchorDashboard','bridge/position','GET',None,None),
+    ('ship','CEngine','cargo/climate','POST',4,{'m2m:cin':{'con':'denied'}}),
+    ('ship','CEngine','bridge/command','POST',4,{'m2m:cin':{'con':'denied'}}),
+    ('ship','CBridge','bridge/command','POST',4,{'m2m:cin':{'con':'denied'}}),
+    ('shore','CAnchorEdge','anchor/receipts','PUT',None,{'m2m:cnt':{'lbl':['denied']}}),
+    ('shore','CAnchorDashboard','anchor/events','POST',4,{'m2m:cin':{'con':'denied'}}),
+    ('shore','CAnchorDashboard','anchor/receipts','POST',23,{'m2m:sub':{'rn':'denied','nu':['CAnchorDashboard']}}),
+    ('shore','CAnchorAgent','anchor/events','GET',None,None),
+])
+def test_real_acme_reader_and_device_denials(fleet,role,origin,path,method,ty,body):
+    nodes=fleet[1]
+    client=Client(nodes[role],origin)
+    with pytest.raises(OneM2MError) as denied:
+        client.request(method,client.root+'/'+path,body,ty)
+    assert denied.value.rsc==4103
+
+
+def test_real_acme_shore_reader_can_read_and_create_own_subscription(fleet):
+    nodes=fleet[1]
+    reader=Client(nodes['shore'],'CAnchorDashboard')
+    for name in ('events','receipts','commands'):
+        assert resource(reader.get(reader.root+'/anchor/'+name))['ty']==3
+    sub=reader.ensure(reader.root+'/anchor/events',23,{'m2m:sub':{
+        'rn':'reader-test','nu':['CAnchorDashboard'],'enc':{'net':[3]},'nct':1}})
+    assert resource(sub)['ty']==23
+
+
+def test_real_acme_sender_cannot_delete_and_core_cannot_change_acp(fleet):
+    nodes=fleet[1]
+    admin=Client(nodes['shore'],'CAdmin')
+    parent=admin.root+'/anchor/events'
+    probe=resource(admin.create(parent,4,{'m2m:cin':{'rn':'security-delete-probe','con':'{}'}}))
+    try:
+        with pytest.raises(OneM2MError) as denied:
+            Client(nodes['shore'],'CAnchorShip').request('DELETE',parent+'/'+probe['rn'])
+        assert denied.value.rsc==4103
+    finally:
+        admin.request('DELETE',parent+'/'+probe['rn'])
+    path=admin.root+'/acp-anchor-events'
+    policy=resource(admin.get(path))
+    with pytest.raises(OneM2MError) as denied:
+        Client(nodes['shore'],'CAnchorShore').update(path,{'m2m:acp':{'pv':policy['pv']}})
+    assert denied.value.rsc==4103
+
+
+def test_real_acme_partial_group_conflict_repairs_missing_member(fleet):
+    ship=fleet[0]['ship']
+    command=make({'commandId':'real-partial-group'})
+    name=record_name(command['commandId'])
+    ship.local.put_record(ship.local.root+'/bridge/command',name,command)
+    assert dispatch(ship.local,ship.journal,command,int(time.time()*1000),{})=='dispatched'
+    assert json.loads(resource(ship.local.get(ship.local.root+'/engine/command/'+name))['con'])==command
+
+
+def test_https_status_token_cannot_submit_commands(fleet):
+    import requests
+    cfg=fleet[4]['shore']
+    url=f'https://127.0.0.1:{cfg.port}'
+    with requests.Session() as session:
+        session.trust_env=False
+        assert session.get(url+'/status',verify=cfg.tls_ca,timeout=3).status_code==401
+        headers={'Authorization':'Bearer status-token-with-at-least-24-characters'}
+        response=session.get(url+'/status',headers=headers,verify=cfg.tls_ca,timeout=3)
+        assert response.status_code==200 and 'latest' not in response.json()
+        for path in ('/commands','/incidents/ack','/batches'):
+            assert session.post(url+path,headers=headers,json={},verify=cfg.tls_ca,timeout=3).status_code==403

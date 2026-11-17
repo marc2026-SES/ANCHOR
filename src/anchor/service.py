@@ -1,5 +1,4 @@
 """Same operator view on ship, coastal MEC app and shore; device UI is retained."""
-import hmac
 import json
 import signal
 import threading
@@ -9,9 +8,11 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from .runtime import Runtime
+from .auth import ApiTokens, monitor_status, read_token
 
 
-def make_server(runtime, token):
+def make_server(runtime, token, status_token=''):
+    credentials = ApiTokens(token, status_token)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -29,7 +30,14 @@ def make_server(runtime, token):
             self.wfile.write(payload)
 
         def authorized(self):
-            return hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + token)
+            identity = credentials.identify(self.headers.get('Authorization', ''))
+            if identity is None:
+                self.send(401, {'error': 'API token required'})
+                return None
+            if identity == 'status' and (self.command != 'GET' or self.path != '/status'):
+                self.send(403, {'error': 'Status token permits GET /status only'})
+                return None
+            return identity
 
         def do_GET(self):
             if self.path == '/':
@@ -38,11 +46,13 @@ def make_server(runtime, token):
                 fresh = bool(runtime.last_scan and time.time() - runtime.last_scan < max(15, runtime.settings.scan_seconds * 3))
                 ready = runtime.ready and fresh
                 return self.send(200 if ready else 503, {'ready': ready, 'role': runtime.role})
-            if not self.authorized():
-                return self.send(401, {'error': 'API token required'})
+            identity = self.authorized()
+            if not identity:
+                return
             try:
                 if self.path == '/status':
-                    return self.send(200, runtime.status())
+                    state = runtime.status()
+                    return self.send(200, monitor_status(state) if identity == 'status' else state)
                 if self.path.startswith('/batches/'):
                     return self.send(200, runtime.batch_status(unquote(self.path[len('/batches/'):])) )
                 self.send(404, {'error': 'Not found'})
@@ -53,7 +63,7 @@ def make_server(runtime, token):
 
         def do_POST(self):
             if self.path != '/notify' and not self.authorized():
-                return self.send(401, {'error': 'API token required'})
+                return
             try:
                 size = int(self.headers.get('Content-Length', 0))
                 if not 0 < size <= 65536:
@@ -94,11 +104,10 @@ def make_server(runtime, token):
 
 
 def serve(settings):
-    token = Path(settings.token_file).read_text().strip()
-    if len(token) < 24:
-        raise ValueError('Generate a token with anchor --config ... init-token first')
+    token = read_token(settings.token_file)
+    status_token = read_token(settings.status_token_file) if settings.status_token_file else ''
     runtime = Runtime(settings)
-    httpd = make_server(runtime, token)
+    httpd = make_server(runtime, token, status_token)
     def ready_loop():
         while not runtime.done.is_set():
             try:

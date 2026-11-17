@@ -17,3 +17,5 @@ deploy/**/*.local.ini
 **/anchor_*_tls.h
 *.key
 *.pem
+**/api-token
+**/status-token

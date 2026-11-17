@@ -40,6 +40,7 @@ class Settings:
     port: int = 8790
     notify_url: str = "https://127.0.0.1:8790/notify"
     token_file: str = ""
+    status_token_file: str = ""
     tls_cert: str = ""
     tls_key: str = ""
     tls_ca: str = ""
@@ -49,6 +50,7 @@ class Settings:
     batch_size: int = 40
     critical_burst: int = 4
     direct_shore: bool = False
+    dashboard_edge_read: bool = False
     tilt: dict = field(default_factory=lambda: {"trigger": 25, "recover": 15, "holdSeconds": 2,
                                                 "recoverSeconds": 2, "maxGapSeconds": 4})
 
@@ -57,6 +59,8 @@ class Settings:
             raise ValueError("A local endpoint is required for ship, edge or shore")
         if not self.vessel_id or ":" in self.vessel_id:
             raise ValueError("vessel_id must be nonempty and contain no colon")
+        if type(self.dashboard_edge_read) is not bool:
+            raise ValueError('dashboard_edge_read must be a boolean')
         if not 0.2 <= self.scan_seconds <= 60 or min(self.max_records, self.max_bytes, self.batch_size, self.critical_burst) <= 0:
             raise ValueError("Invalid scan interval or storage/batch limit")
         if self.batch_size <= self.critical_burst:
@@ -71,7 +75,7 @@ class Settings:
         path = Path(filename).resolve()
         data = json.loads(path.read_text())
         data['nodes'] = {k: Endpoint(**v) for k, v in data['nodes'].items()}
-        for field_name in ('token_file', 'tls_cert', 'tls_key', 'tls_ca'):
+        for field_name in ('token_file', 'status_token_file', 'tls_cert', 'tls_key', 'tls_ca'):
             if data.get(field_name) and not Path(data[field_name]).is_absolute():
                 data[field_name] = str((path.parent / data[field_name]).resolve())
         for endpoint in data['nodes'].values():

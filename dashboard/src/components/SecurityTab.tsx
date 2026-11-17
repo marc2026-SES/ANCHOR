@@ -1,6 +1,6 @@
 import { ACPS, DENY_TESTS, TRANSPORT } from '../security/acp'
 
-const OPS: Record<string, string> = { C: 'create', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
+const OPS: Record<string, string> = { C: 'create', 'C(SUB)': 'create subscription only: acod/chty=[23]', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
 
 export function SecurityTab() {
   return (
@@ -29,12 +29,12 @@ export function SecurityTab() {
             </tbody>
           </table>
         </div>
-        <p className="note">C create · R retrieve · U update · D delete · N notify · Di discover. Anything not listed is denied (4103).</p>
+        <p className="note">C create · C(SUB) create subscription only · R retrieve · U update · D delete · N notify · Di discover. Conditional create does not permit CIN writes.</p>
       </section>
 
       <div className="row two">
         <section className="panel">
-          <header className="panel-head"><h3>Denied-request tests</h3><span>T1–T7 must be refused · T8 must pass</span></header>
+          <header className="panel-head"><h3>Access-control tests</h3><span>T8 and T12 must pass · all other requests must be refused</span></header>
           <table className="grid">
             <thead><tr><th>#</th><th>Test</th><th>Request</th><th>Expected</th><th>Result</th></tr></thead>
             <tbody>

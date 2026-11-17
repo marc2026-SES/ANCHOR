@@ -14,7 +14,7 @@ npm run dev        # http://localhost:5180  (포트는 vite.config.ts에서 변�
 ## 구조 전제 (팀 core)
 
 ```
-선박 Pi 5 (ship CSE + core)  ←A→  연안 (edge CSE + Edge 앱)  ←B→  육상 Pi 4 (shore CSE + core)
+선박 Pi 5 (ship CSE + core)  ←A→  연안 MEC Host (edge CSE + Edge 앱)  ←B→  육상 Pi 4 (shore CSE + core)
 ```
 
 - A(선박↔연안)와 B(연안↔육상)는 따로 연결되고, 동시에 연결돼 있을 필요가 없습니다.
@@ -38,7 +38,7 @@ npm run dev        # http://localhost:5180  (포트는 vite.config.ts에서 변�
 | Overview | 데이터 연속성(10초당 육상 도착 건수, 선박·연안 대기 건수), 선박·연안·육상에 데이터가 몇 건씩 있는지, 이벤트(링크·기울기 사건·명령·재부팅) |
 | Sensors | BRIDGE(roll·pitch), ENGINE(진동 RMS, MQ-2 전압 V), CARGO(온도, 해치) 그래프와 센서 품질(bootId, seq 공백, GPS fix, DHT11, MQ-2 예열). x축 = 노드 생성 시각, 기다렸다 도착한 데이터는 보라색 |
 | Measurement | ANCHOR vs Baseline 비교표, 육상 도착 지연 분포, 실행별 CSV 내보내기 |
-| Security | bootstrap이 만드는 ACP 목록(자원 이름 = ACP 이름), 거부 테스트 T1~T8, 전송 구간·프라이버시 |
+| Security | 자원별 ACP 목록(`acp-` + 경로), 허용·거부 시험 T1~T15, 전송 구간·프라이버시 |
 
 ## 측정 지표
 
@@ -50,7 +50,7 @@ npm run dev        # http://localhost:5180  (포트는 vite.config.ts에서 변�
 | 밀린 데이터 처리 시간 | 링크가 다시 연결된 시각부터, 그 전에 대기하던 마지막 이벤트가 건너편에 저장될 때까지 |
 | 육상 명령 | 육상 발행 → 연안 보관 → 선박 수신 → ESP32 적용 결과(`applied`), 유효시간(TTL) 안에 적용됐는지 |
 
-Baseline은 보관 없이 실시간으로만 전달하는 방식입니다. A나 B가 끊긴 동안 생긴 데이터는 전달되지 않습니다.
+이 화면의 Baseline은 보관 없이 실시간으로만 전달하는 방식을 가정한 **더미 데이터**입니다. 실제 장비용 baseline 전달기는 아직 없으며, 화면의 비교 값을 실측 결과로 사용하면 안 됩니다.
 
 ## 구조
 
@@ -67,7 +67,8 @@ src/
 
 ## 다음 단계
 
-- [ ] Shore Monitor AE: 육상(·연안) `anchor/events`를 구독하고 CIN `ct`를 `shoreAt`(`coastAt`)으로 저장 → `mock/scenario.ts` 대신 연결
-- [ ] 육상 `anchor-events`·`anchor-receipts` ACP에 대시보드 identity 읽기 권한 추가 (시우와 협의)
+- [ ] 별도로 개발한 Shore Monitor AE를 이 체크아웃에 연결: 육상 `anchor/events` 구독·조회, 선택 연안 조회 → `mock/scenario.ts` 대신 연결
+- [x] bootstrap에 `CAnchorDashboard`의 육상 events·receipts·commands 읽기, events의 SUB 전용 생성 권한 구현 (실제 CSE 적용·검증 대기)
+- [x] core `GET /status` 전용 토큰 구현. 연결 주소·토큰 설치 방법은 루트 README 참고
 - [ ] 수조 시험 ANCHOR / Baseline 실측 CSV
-- [ ] 거부 테스트 T1~T8 실행 후 Security 탭 결과 반영
+- [ ] Pi 두 대와 연안 MEC Host(임시로 맥)를 모두 켜고 T1~T15 실행 후 결과 반영. 현재 결과는 미실행
