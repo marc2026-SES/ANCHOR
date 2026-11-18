@@ -11,6 +11,10 @@ const uint32_t MQ2_WARMUP_MS = 120000;  // readings before this are flagged warm
 
 AnchorNode node("CEngine", "engine", "Nanchor.engine");
 bool adxlOk = false;
+#ifndef ANCHOR_ENABLE_DDS_SOURCE
+#define ANCHOR_ENABLE_DDS_SOURCE 1
+#endif
+AnchorRawVibration rawVibration;
 
 void adxlWrite(uint8_t r, uint8_t v) {
   Wire.beginTransmission(ADXL);
@@ -74,6 +78,9 @@ void loop() {
     tSample = now;
     float x, y, z;
     if (adxlRead(x, y, z)) {
+#if ANCHOR_ENABLE_DDS_SOURCE
+      rawVibration.add(AnchorNode::nowMs(), micros(), x, y, z);
+#endif
       if (!n) windowStartedAt = now;
       float m = sqrtf(x * x + y * y + z * z);
       sm += m;
@@ -94,6 +101,13 @@ void loop() {
       peak = 0;
     }
   }
+
+#if ANCHOR_ENABLE_DDS_SOURCE
+  if (rawVibration.due(micros())) {
+    node.publishRawVibration(rawVibration);
+    rawVibration.clear();  // Live data is never replayed over the durable CIN queue.
+  }
+#endif
 
   if (now - tGas >= 2000) {
     tGas = now;

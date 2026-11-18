@@ -1,0 +1,18 @@
+[Unit]
+Description=ANCHOR %i native DDS sensor transport
+After=network-online.target time-sync.target anchor-cse@%i.service
+Wants=network-online.target
+ConditionPathExists=/opt/anchor/deploy/%i/dds.json
+
+[Service]
+User=pi
+WorkingDirectory=/opt/anchor
+ExecStart=/opt/anchor/deploy/%i/run.sh dds
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

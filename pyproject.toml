@@ -12,9 +12,11 @@ dependencies = ["requests>=2.31", "paho-mqtt>=2.0"]
 [project.optional-dependencies]
 test = ["pytest>=8"]
 dev-broker = ["amqtt==0.12.1"]
+dds = ["cyclonedds==11.1.0"]
 
 [project.scripts]
 anchor = "anchor.entrypoint:main"
+anchor-dds = "anchor.dds.cli:main"
 anchor-lab = "anchor.lab.entrypoint:main"
 
 [tool.setuptools.package-data]
