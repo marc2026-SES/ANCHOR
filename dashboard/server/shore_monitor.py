@@ -51,7 +51,7 @@ DEFAULTS = {
     'shore': {'url': '', 'root': 'cse-in', 'csi': '/id-in', 'rvi': '3', 'timeout': 3},
     # Coastal CSE. Optional: needs CAnchorDashboard R Di on cse-edge/anchor/events and anchor/commands.
     'edge': {'url': '', 'root': 'cse-edge', 'csi': '/id-edge', 'rvi': '3', 'timeout': 3},
-    # Ship CSE. Not read by the monitor; only deny_tests.py uses it (T1–T4).
+    # Ship CSE. Read only for AI results when the shore has no copy (ai.sources); deny_tests.py uses it (T1–T4).
     'ship': {'url': '', 'root': 'cse-ship', 'csi': '/id-ship', 'rvi': '3', 'timeout': 3},
     # Where the shore CSE sends notifications. url empty = no subscription, scan only.
     'notify': {'bind': '0.0.0.0', 'port': 8796, 'url': '', 'sub_name': 'shore-monitor'},
@@ -76,6 +76,9 @@ DEFAULTS = {
     # cert/key: a server certificate for this machine, needed only for an https notify.url (on the shore
     # Pi: its own tls/server.crt and server.key) and for an API that listens beyond loopback.
     'tls': {'ca': '', 'cert': '', 'key': ''},
+    # AI results (<root>/anchorAI/…), read as CAnchorDashboard: the shore CSE's copy first (same Pi, no ship
+    # access needed), else the ship CSE (needs ship.url).
+    'ai': {'enabled': True, 'ae': 'anchorAI', 'sources': ['shore', 'ship'], 'scan_seconds': 5, 'stale_seconds': 90},
 }
 
 POSITION_FIELDS = ('lat', 'lon')
@@ -115,6 +118,8 @@ def load_config(filename):
             raise SystemExit(f'{site}.url must start with http:// or https://')
         if not node['root'] or '/' in node['root'] or not node['csi'].startswith('/'):
             raise SystemExit(f'{site}: invalid root or csi')
+    if not set(cfg['ai']['sources']) <= {'shore', 'ship'}:
+        raise SystemExit("ai.sources: only 'shore' and 'ship' (in the order to try)")
     if cfg['run']['mode'] not in ('anchor', 'baseline'):
         raise SystemExit('run.mode must be anchor or baseline')
     tls = cfg['tls']
@@ -305,6 +310,9 @@ CREATE TABLE IF NOT EXISTS links(
   id INTEGER PRIMARY KEY AUTOINCREMENT, t_ms REAL NOT NULL, link TEXT NOT NULL, up INTEGER NOT NULL, source TEXT);
 CREATE TABLE IF NOT EXISTS reach(
   id INTEGER PRIMARY KEY AUTOINCREMENT, t_ms REAL NOT NULL, role TEXT NOT NULL, ok INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS ai(
+  ri TEXT PRIMARY KEY, event_id TEXT NOT NULL, kind TEXT NOT NULL, ct_ms REAL NOT NULL, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ai_kind ON ai(kind, ct_ms);
 CREATE TABLE IF NOT EXISTS runs(
   run_id TEXT PRIMARY KEY, mode TEXT NOT NULL, start_ms REAL NOT NULL, end_ms REAL, created_ms REAL NOT NULL);
 '''
@@ -377,6 +385,14 @@ class Store:
         """When a core's control API became reachable or unreachable for the monitor."""
         with self.lock:
             self.db.execute('INSERT INTO reach(t_ms, role, ok) VALUES(?,?,?)', (t_ms, role, int(ok)))
+
+    def put_ai(self, ri, event_id, kind, ct_ms, body):
+        with self.lock:
+            self.db.execute('INSERT OR IGNORE INTO ai(ri, event_id, kind, ct_ms, body) VALUES(?,?,?,?,?)',
+                            (ri, event_id, kind, ct_ms, json.dumps(body, sort_keys=True)))
+
+    def ai_known(self):
+        return {r[0] for r in self.db.execute('SELECT ri FROM ai')}
 
     def current_run(self):
         row = self.db.execute('SELECT run_id, mode, start_ms, end_ms FROM runs WHERE end_ms IS NULL '
@@ -516,6 +532,210 @@ class JournalReader:
             return 0
 
 
+def ai_sources(cfg):
+    """Where to look for anchorAI, in order (default: the shore copy, then the ship)."""
+    return [(site, CSE(cfg[site], cfg['origin'])) for site in cfg['ai']['sources'] if site in ('shore', 'ship')
+            and cfg[site]['url']]
+
+
+class _NoStore:
+    """check() reads the AI records without storing them."""
+    def ai_known(self):
+        return set()
+
+    def put_ai(self, *args):
+        pass
+
+
+AI_RECORDS = ('anomaly', 'prognosis', 'linkForecast')  # kept as history; aiStatus and summary: latest only
+
+
+class AiReader:
+    """The AI's results (<root>/anchorAI/aiStatus, anomaly, summary, prognosis, linkForecast), read as
+    CAnchorDashboard like everything else. Sources in order: the copy on the shore CSE (the AI plans to
+    replicate its results there), then the ship CSE itself.
+
+    Read from the ship, they are reachable only while the ship is: with link A down the state is
+    'ship_unreachable', not 'AI offline'. States: ok · stale (no new aiStatus for stale_seconds) ·
+    no_ai (anchorAI on no source) · forbidden (no ACP grant) · ship_unreachable · error."""
+
+    def __init__(self, sources, store, cfg):
+        self.sources, self.store = sources, store  # [(label, CSE)]
+        self.ae = cfg['ai']['ae']
+        self.cse, self.label = sources[0][1], None
+        self.base = f"{self.cse.root}/{self.ae}"
+        self.stale_ms = cfg['ai']['stale_seconds'] * 1000
+        self.redact = cfg['redact_position']
+        self.full_every = cfg['full_scan_seconds']
+        self.state, self.error, self.checked_at = 'starting', None, None
+        self.status, self.status_id, self.status_seen, self.status_ts = None, None, None, None
+        self.behind = False  # the shore copy lags the ship: read the ship until the copy catches up
+        self.summary = None
+        self.known = store.ai_known()
+        self.high, self.last_full = {}, {}
+
+    def latest(self, name):
+        rsc, body = self.cse.exchange('GET', f'{self.base}/{name}/la')
+        if rsc == 4004:
+            return None, None  # container missing or still empty
+        if not 2000 <= rsc < 3000:
+            raise OneM2MError(rsc, body, f'{self.base}/{name}/la')
+        cin = resource(body)
+        return cin, parse_con(cin)
+
+    def collect(self, name):
+        path, key = f'{self.base}/{name}', (self.label, name)
+        full = key not in self.high or time.monotonic() - self.last_full.get(key, 0) >= self.full_every
+        filters = {'ty': 4, 'drt': 2}
+        if not full:
+            filters['cra'] = ms_ct(self.high[key] - 10_000)
+        try:
+            refs = self.cse.discover(path, **filters)
+        except OneM2MError as exc:
+            if exc.rsc == 4004:
+                return
+            raise
+        for ref in refs:
+            if ref in self.known:
+                continue
+            cin = resource(self.cse.get(ref))
+            at = ct_ms(cin['ct'])
+            try:
+                value = parse_con(cin)
+                if not isinstance(value.get('eventId'), str):
+                    raise ValueError('no eventId')
+                if self.redact and any(k in value for k in POSITION_FIELDS):
+                    value = {k: v for k, v in value.items() if k not in POSITION_FIELDS}
+                    value['redacted'] = list(POSITION_FIELDS)
+                self.store.put_ai(ref, value['eventId'], name, at, value)
+            except (ValueError, TypeError):
+                pass  # not an AI record; skip it
+            self.known.add(ref)
+            self.high[key] = max(self.high.get(key, at), at)
+        if full:  # an empty container stays on full scans (cheap), so no CSE time is guessed from this clock
+            self.last_full[key] = time.monotonic()
+
+    def pick(self):
+        """The first source that has anchorAI, else the state that explains why none does."""
+        seen = {}
+        for label, cse in self.sources:
+            base = f'{cse.root}/{self.ae}'
+            try:
+                rsc, _ = cse.exchange('GET', base)
+            except (urllib.error.URLError, OSError) as exc:
+                seen[label] = describe(exc)
+                continue
+            if rsc == 2000:
+                self.cse, self.base, self.label = cse, base, label
+                return None
+            seen[label] = rsc
+        if 4103 in seen.values():
+            where = ', '.join(k for k, v in seen.items() if v == 4103)
+            return 'forbidden', f'CAnchorDashboard may not read anchorAI on the {where} CSE (ACP grant missing)'
+        if isinstance(seen.get('ship'), str):
+            return 'ship_unreachable', seen['ship']
+        if all(v == 4004 for v in seen.values()):
+            return 'no_ai', f"anchorAI is on no CSE ({', '.join(seen)}): the AI has not started"
+        return 'error', '; '.join(f'{k}: {v}' for k, v in seen.items())
+
+    @staticmethod
+    def status_time(value):
+        try:
+            return datetime.fromisoformat(str(value['ts']).replace('Z', '+00:00')).timestamp() * 1000
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def caught_up(self, value):
+        """Has this (shore copy) aiStatus reached the one shown?"""
+        if value is None:
+            return False
+        ts = self.status_time(value)
+        return value.get('eventId') == self.status_id or (ts is not None and self.status_ts is not None
+                                                          and ts >= self.status_ts)
+
+    def take_status(self, value):
+        """A new aiStatus, unless it is the one already shown or an older one (a lagging copy)."""
+        if value is None or value.get('eventId') == self.status_id:
+            return
+        ts = self.status_time(value)
+        if ts is not None and self.status_ts is not None and ts <= self.status_ts:
+            return
+        first = self.status_id is None
+        self.status, self.status_id, self.status_seen, self.status_ts = value, value.get('eventId'), now_ms(), ts
+        if first and ts is not None and now_ms() - ts > self.stale_ms + 60_000:
+            self.status_seen = ts  # only at start: the newest status is already old (generous margin for clocks)
+
+    def read(self):
+        self.take_status(self.latest('aiStatus')[1])
+        _, self.summary = self.latest('summary')
+        for name in AI_RECORDS:
+            self.collect(name)
+
+    def quiet(self):
+        """Why the AI looks silent, or None while aiStatus keeps arriving."""
+        if self.status_seen is None:
+            return 'no aiStatus yet'
+        if now_ms() - self.status_seen > self.stale_ms:
+            return f'no new aiStatus for {round((now_ms() - self.status_seen) / 1000)} s'
+        return None
+
+    def scan(self):
+        try:
+            missing = self.pick()
+            if missing:
+                return self._set(*missing)
+            if self.label == 'shore' and self.behind:
+                if not self.caught_up(self.latest('aiStatus')[1]):
+                    return self.check_ship('the shore copy is behind')
+                self.behind = False
+            self.read()
+            why = self.quiet()
+            if why and self.label == 'shore':
+                return self.check_ship(f'{why} on the shore copy')
+            return self._set('stale', why) if why else self._set('ok', None)
+        except OneM2MError as exc:
+            return self._set('error', describe(exc))
+        except (urllib.error.URLError, OSError) as exc:
+            return self._set('ship_unreachable' if self.label == 'ship' else 'error', describe(exc))
+
+    def check_ship(self, why):
+        """The shore copy went quiet: the AI itself, or only the copying (link A down, replication behind)?"""
+        ship = dict(self.sources).get('ship')
+        self.behind = False
+        if ship is None:
+            return self._set('stale', why)
+        base = f'{ship.root}/{self.ae}'
+        try:
+            rsc, _ = ship.exchange('GET', base)
+        except (urllib.error.URLError, OSError) as exc:
+            return self._set('ship_unreachable', f'{why} and the ship CSE is not reachable '
+                             f'({describe(exc)}): the AI may be fine, its results arrive when the link is back')
+        if rsc != 2000:
+            return self._set('stale', f'{why} (ship CSE anchorAI: {rsc})')
+        self.cse, self.base, self.label = ship, base, 'ship'
+        self.read()
+        again = self.quiet()
+        if again:
+            return self._set('stale', f'{again} on the shore copy or the ship CSE: the AI is not writing')
+        self.behind = True
+        return self._set('ok', 'the shore copy is behind: reading the ship CSE until it catches up')
+
+    def _set(self, state, error):
+        self.state, self.error, self.checked_at = state, error, now_ms()
+
+    def view(self, db, start, upper):
+        out = {'state': self.state, 'error': self.error, 'checkedAt': self.checked_at, 'source': self.label,
+               'status': {**self.status, 'seenAt': self.status_seen} if self.status else None,
+               'summary': self.summary}
+        for kind in AI_RECORDS:
+            first = {}  # the same eventId may be stored from the ship and from the shore copy: keep the earliest
+            for r in db.execute('SELECT event_id, body, ct_ms FROM ai WHERE kind=? AND ct_ms >= ? AND ct_ms <= ? '
+                                'ORDER BY ct_ms', (kind, start, upper)):
+                first.setdefault(r['event_id'], {**json.loads(r['body']), 'at': r['ct_ms']})
+            out[kind] = sorted(first.values(), key=lambda v: -v['at'])[:200]
+        return out
+
+
 class Monitor:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -538,6 +758,7 @@ class Monitor:
         self.link_state = self.store.link_states()
         self.link_seen = {}
         self.reach = {}  # role → reachable at the last poll
+        self.ai = AiReader(ai_sources(cfg), self.store, cfg) if cfg['ai']['enabled'] and ai_sources(cfg) else None
         if not self.store.current_run():
             run = cfg['run']
             self.store.start_run(run['id'], run['mode'], now_ms() - run['history_minutes'] * 60_000)
@@ -666,6 +887,9 @@ class Monitor:
         if any(s.configured for s in self.cores.values()):
             threads.append(threading.Thread(target=self._loop, name='cores', daemon=True,
                                             args=(self.cfg['core_seconds'], self.poll_cores)))
+        if self.ai:
+            threads.append(threading.Thread(target=self._loop, name='ai', daemon=True,
+                                            args=(self.cfg['ai']['scan_seconds'], self.ai.scan)))
         for t in threads:
             t.start()
 
@@ -678,7 +902,8 @@ class Monitor:
                 'shore': self.cfg['shore']['url'], 'edge': self.cfg['edge']['url'] or None,
                 'ae': self.ae.view(), 'subscription': {**self.subscription.view(), 'notifications': self.notifications},
                 'journals': readers, 'cores': {role: s.view() for role, s in self.cores.items()},
-                'run': self.store.current_run()}
+                'run': self.store.current_run(),
+                'ai': {'state': self.ai.state, 'error': self.ai.error} if self.ai else None}
 
     def inferred_now(self):
         """Link state from arrivals alone, on the monitor's own clock (no comparison with CSE clocks).
@@ -818,7 +1043,7 @@ def run_view(monitor, run_id=None, after=0):
                        + inferred, key=lambda c: c['t'])
         return {'runId': row['run_id'], 'mode': row['mode'], 'start': start, 'end': end, 'now': now_ms(),
                 'rev': rev, 'after': after, 'events': events, 'commands': commands, 'links': links,
-                'live': live}
+                'live': live, 'ai': monitor.ai.view(db, start, upper) if monitor.ai else None}
     finally:
         db.close()
 
@@ -996,6 +1221,12 @@ def check(cfg):
                 rows.append(('--', f'shore subscription {sub}', body)) if rsc is None else rows.append(('ok', f'shore subscription {sub}', resource(body).get('nu')) if rsc == 2000 else
                             ('  ', f'shore subscription {sub}', 'not made yet: serve creates it') if rsc == 4004 else
                             ('--', f'shore subscription {sub}', describe(OneM2MError(rsc, body, sub))))
+    if cfg['ai']['enabled'] and ai_sources(cfg):
+        ai = AiReader(ai_sources(cfg), _NoStore(), cfg)
+        ai.scan()
+        mark = {'ok': 'ok', 'stale': '  ', 'no_ai': '  '}.get(ai.state, '--')
+        where = f'{ai.label} {ai.base}' if ai.label else '/'.join(cfg['ai']['sources'])
+        rows.append((mark, f"AI results {where} as {origin} (R Di)", ai.state + (f' · {ai.error}' if ai.error else '')))
     for role, c in cfg['cores'].items():
         if not c['url']:
             rows.append(('  ', f'{role} core API', 'not configured'))

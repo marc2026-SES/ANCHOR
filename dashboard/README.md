@@ -116,6 +116,36 @@ python3 server/deny_tests.py --config server/shore-monitor.json --only T2,T8 # �
 - 결과 파일에는 테스트 번호, 응답 코드, CSE 이름만 들어갑니다(주소 없음). 아티클 근거로 git에 올려도 됩니다.
 - 기대와 다르면 종료 코드 1, 표에 `fail`과 이유가 나옵니다.
 
+### 6. AI 결과 (AI 탭)
+
+AI 결과는 `anchorAI/` 아래(`aiStatus`, `anomaly`, `summary`, `prognosis`, `linkForecast`)에 있습니다(자연의 "AI → 대시보드 연동 스펙"). 모니터는 5초마다 `CAnchorDashboard` 신원으로 읽고, `CAdmin`으로는 읽지 않습니다.
+
+- 읽는 곳: 육상 CSE의 복제본(`cse-in/anchorAI`)을 먼저 보고, 없으면 선박 CSE(`ship.url`)를 봅니다. 화면 AI 상태 칸에 어디서 읽었는지 나옵니다. 순서는 `"ai": {"sources": ["shore", "ship"]}`로 바꿀 수 있습니다.
+- 육상 복제본에 새 `aiStatus`가 안 들어오면 선박 CSE를 확인해서 원인을 나눕니다.
+  - 선박에 접속 안 됨 → **Ship not reachable** (링크 A 끊김. AI 고장 아님)
+  - 선박에는 새 결과가 있음 → 복제가 늦는 것. 따라잡을 때까지 선박에서 읽음
+  - 선박에도 새 결과가 없음 → **AI not responding**
+- 화면: AI 탭에 서브시스템별 상태(정상/주의/심각), 이상 탐지 목록(점수, 원인 상위 3개), 고장 예고와 통신 끊김 예측, 1분 요약. 고장 예고(남은 시간)와 최근 2분 안의 심각한 이상은 어느 탭에서든 위에 띄웁니다.
+- 상태 표시
+
+  | 상태 | 뜻 |
+  | --- | --- |
+  | AI online | 상태 신호가 들어오는 중 |
+  | AI not responding | 새 `aiStatus`가 90초 넘게 없음 (육상 복제본·선박 둘 다) |
+  | AI not running | 육상·선박 CSE 어디에도 `anchorAI`가 없음 (AI 시작 전) |
+  | Ship not reachable | 새 결과가 없는데 선박 CSE에도 접속 안 됨 (링크 A 끊김). AI 고장 아님 |
+  | No permission | ACP에 `CAnchorDashboard` 읽기 권한이 없음 |
+
+- 필요한 것
+  - `anchorAI` 아래 자원에 `CAnchorDashboard` R Di 권한 (시우). 선박과 육상 복제본 둘 다
+  - AI가 결과를 쓸 때 `CAdmin`이 아닌 자기 신원 `CAnchorAgent`로 쓰기 (자연). 복제본을 쓰는 쪽도 같음
+  - 육상 복제본 경로가 `cse-in/anchorAI/<같은 이름>`인지 확인 (자연·시우)
+  - 선박 CSE 주소는 HTTPS (`https://ship.local:8080`)
+- 같은 결과가 선박과 복제본 양쪽에서 읽혀도 `eventId`로 한 번만 보여줍니다.
+- 한계: 링크 A가 끊긴 동안에는 새 AI 결과가 육상에 안 옵니다. 끊긴 동안 생긴 이상·예측은 선박에 남아 있다가 다시 연결되면 보입니다(시험에서 확인). 복제가 ANCHOR 저널을 타지 않으면 우선 전송·수신 확인은 없습니다.
+- `linkForecast`의 `lat`·`lon`은 저장 전에 지웁니다(`redact_position`).
+- 끄기: 설정에 `"ai": {"enabled": false}`.
+
 ### 실데이터일 때 화면에서 달라지는 점
 
 - 링크 A·B: 기본은 선박·연안 core의 보고입니다. core는 다음 전송 시도 때 끊김을 알아채므로 실제보다 몇 초 늦게 바뀝니다.

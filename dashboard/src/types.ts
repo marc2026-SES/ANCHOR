@@ -94,4 +94,33 @@ export interface Run {
   feed: FeedItem[]
   /** set only for a run read from the Shore Monitor AE while it is still open */
   live?: LiveInfo | null
+  /** AI results read from the ship CSE (live), or demo samples */
+  ai?: AiInfo | null
+}
+
+// ── AI results (<root>/anchorAI/… on the shore CSE copy, else the ship CSE, read by the Shore Monitor;
+//    spec: "AI → 대시보드 연동 스펙") ──
+export type AiState = 'ok' | 'stale' | 'no_ai' | 'forbidden' | 'ship_unreachable' | 'error' | 'starting'
+export type AiLevel = 'normal' | 'warn' | 'critical'
+export interface AiStatus {
+  eventId: string; state?: string; profile?: string; ts?: string; windows?: number
+  levels?: Record<string, AiLevel>; sirenOn?: boolean; seenAt?: number | null
+}
+export interface AiAnomaly {
+  eventId: string; subsystem: string; level: AiLevel; score: number
+  topFeatures?: { feature: string; z: number }[]; windowStart?: string; windowEnd?: string; srcContainers?: string[]; at: number
+}
+export interface AiPrognosis {
+  eventId: string; type?: string; channel: string; threshold?: number; value?: number; slopePerMin?: number; etaS: number; ts?: string; at: number
+}
+export interface AiLinkForecast { eventId: string; type: string; mode?: string; routeMode?: string; etaS?: number; at: number }
+export interface AiSummary {
+  eventId: string; windowStart?: string; windowEnd?: string
+  stats?: Record<string, { mean: number; min: number; max: number; n: number }>
+}
+export interface AiInfo {
+  state: AiState; error: string | null; checkedAt: number | null
+  source?: 'shore' | 'ship' | null  // where the last read came from
+  status: AiStatus | null; summary: AiSummary | null
+  anomaly: AiAnomaly[]; prognosis: AiPrognosis[]; linkForecast: AiLinkForecast[]
 }

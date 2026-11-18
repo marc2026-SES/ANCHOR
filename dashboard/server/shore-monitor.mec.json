@@ -1,0 +1,34 @@
+{
+  "_comment": "MEC sandbox (TR-0077 Option D): ship, edge and shore CSEs on the MEC host, reached over Tailscale (plain HTTP NodePorts relayed on 100.96.155.4; Tailscale encrypts the path). Run on a laptop logged in to the team Tailscale. Read-only as CAnchorDashboard; no subscription (scan only), no core tokens. Separate db and port from the Pi monitor.",
+  "shore": {
+    "url": "http://100.96.155.4:30081",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "timeout": 5
+  },
+  "edge": {
+    "url": "http://100.96.155.4:30080",
+    "root": "cse-edge",
+    "csi": "/id-edge",
+    "timeout": 5
+  },
+  "ship": {
+    "url": "http://100.96.155.4:30082",
+    "root": "cse-ship",
+    "csi": "/id-ship",
+    "timeout": 5
+  },
+  "notify": {
+    "url": ""
+  },
+  "api": {
+    "bind": "127.0.0.1",
+    "port": 8797
+  },
+  "db": "data/mec.db",
+  "run": {
+    "id": "mec-sandbox",
+    "mode": "anchor",
+    "history_minutes": 60
+  }
+}
