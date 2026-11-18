@@ -19,6 +19,7 @@
 #include <Preferences.h>
 #include <esp_system.h>
 #include "ReportProfile.h"
+#include "RawVibration.h"
 #include "anchor_config.h"
 
 #ifndef VESSEL_ID
@@ -203,6 +204,31 @@ class AnchorNode {
     return mqtt_.publish(topic, payload);
   }
 
+  bool publishRawVibration(const AnchorRawVibration &batch) {
+    const uint32_t sequence = rawSeq_++;
+    if (!batch.count || !mqtt_.connected() || otaActive_) { rawDropped_++; return false; }
+    JsonDocument body;
+    body["schemaVersion"] = 1;
+    body["vesselId"] = VESSEL_ID;
+    body["deviceId"] = ae_;
+    body["bootId"] = bootId_;
+    body["seq"] = sequence;
+    body["startedAtMs"] = batch.startedAtMs;
+    JsonArray offsets = body["offsetsUs"].to<JsonArray>();
+    JsonArray xyz = body["xyzG"].to<JsonArray>();
+    for (unsigned i = 0; i < batch.count; ++i) {
+      offsets.add(batch.offsetsUs[i]);
+      JsonArray axes = xyz.add<JsonArray>();
+      for (unsigned j = 0; j < 3; ++j) axes.add(batch.xyzG[i][j]);
+    }
+    String payload;
+    serializeJson(body, payload);
+    String topic = String("anchor/raw/") + VESSEL_ID + "/" + ae_ + "/vibration";
+    bool sent = mqtt_.publish(topic.c_str(), payload.c_str(), false);
+    if (!sent) rawDropped_++;
+    return sent;
+  }
+
   // UTC epoch milliseconds, 0 until NTP has synced.
   static uint64_t nowMs() {
     struct timeval tv;
@@ -212,6 +238,7 @@ class AnchorNode {
   }
 
   void printStats() {
+    Serial.printf("[RAW] vibration_batches=%lu dropped=%lu\n", (unsigned long)rawSeq_, (unsigned long)rawDropped_);
     Serial.printf("[STAT] sent=%lu ok=%lu err=%lu queued=%d dropped=%lu last_rsc=%d rssi=%d ntp=%s\n",
                   (unsigned long)sent_, (unsigned long)ok_, (unsigned long)err_, queueSize_,
                   (unsigned long)dropped_, lastRsc_, WiFi.RSSI(), nowMs() ? "synced" : "no");
@@ -220,6 +247,7 @@ class AnchorNode {
   int rssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
 
  private:
+  uint32_t rawSeq_ = 0, rawDropped_ = 0;
   const char *orig_, *ae_, *api_;
   const char *cnts_[8];
   int nCnt_ = 0;

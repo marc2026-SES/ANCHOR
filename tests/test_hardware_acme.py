@@ -148,6 +148,58 @@ def test_provision_is_repeatable_and_hardware_acp_is_enforced(fleet):
     assert resource(bridge.get('cse-ship/bridge/attitude')).get('mni') is None
 
 
+def test_real_acme_agent_reads_and_discovers_six_sensors_without_write_access(fleet):
+    runtimes, nodes, *_ = fleet
+    admin = Client(nodes['ship'], 'CAdmin')
+    agent = Client(nodes['ship'], 'CAnchorAgent')
+    sensors = {'bridge': ('attitude', 'position'), 'engine': ('vibration', 'gas'),
+               'cargo': ('climate', 'hatch')}
+    probes = []
+    try:
+        for device, names in sensors.items():
+            for name in names:
+                parent = agent.root + '/' + device + '/' + name
+                value = {'sensor': device + '/' + name, 'lat': 35.0, 'lon': 129.0} if name == 'position' else {'sensor': name}
+                admin.put_record(parent, 'agent-acp-probe', value)
+                probes.append((parent, value))
+        # Applying the new policy repeatedly must preserve existing samples.
+        runtimes['ship'].provision()
+        assert resource(agent.get(agent.root))['ty'] == 5
+        for device, names in sensors.items():
+            found = agent.children(agent.root + '/' + device, ty=3)
+            assert {path.rsplit('/', 1)[-1] for path in found} == set(names)
+        for parent, value in probes:
+            assert resource(agent.get(parent))['ty'] == 3
+            assert json.loads(resource(agent.get(parent + '/agent-acp-probe'))['con']) == value
+            assert json.loads(resource(agent.get(parent + '/la'))['con']) == value
+            assert any(path.endswith('/agent-acp-probe') for path in agent.children(parent, ty=4))
+            for method, path, ty, body in (
+                ('POST', parent, 4, {'m2m:cin': {'rn': 'agent-forgery', 'con': '{}'}}),
+                ('POST', parent, 23, {'m2m:sub': {'rn': 'agent-sub', 'nu': ['CAnchorAgent']}}),
+                ('PUT', parent, None, {'m2m:cnt': {'lbl': ['agent-edit']}}),
+                ('DELETE', parent + '/agent-acp-probe', None, None),
+            ):
+                with pytest.raises(OneM2MError) as denied:
+                    agent.request(method, path, body, ty)
+                assert denied.value.rsc == 4103, (method, path)
+        for target in ('bridge/command', 'engine/command', 'bridge/commandResults',
+                       'engine/commandResults', 'cargo/temperature', 'anchor/events'):
+            with pytest.raises(OneM2MError) as denied:
+                agent.get(agent.root + '/' + target)
+            assert denied.value.rsc == 4103
+        policy_path = agent.root + '/acp-bridge-position'
+        policy = resource(admin.get(policy_path))
+        with pytest.raises(OneM2MError) as denied:
+            agent.update(policy_path, {'m2m:acp': {'pv': policy['pv']}})
+        assert denied.value.rsc == 4103
+        with pytest.raises(OneM2MError) as denied:
+            agent.as_origin('CAnchorDashboard').get(agent.root + '/bridge/position')
+        assert denied.value.rsc == 4103
+    finally:
+        for parent, _ in probes:
+            admin.request('DELETE', parent + '/agent-acp-probe')
+
+
 def test_nonoverlapping_contact_windows_restart_and_final_receipt(fleet):
     runtimes, nodes, processes, start, configs = fleet
     ship, edge, shore = (runtimes[r] for r in ('ship', 'edge', 'shore'))
