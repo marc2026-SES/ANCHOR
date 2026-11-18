@@ -5,9 +5,9 @@ import { C } from '../theme'
 
 const W = 380, H = 150
 const NODES = [
-  { id: 'ship', x: 52, title: 'Ship', sub: 'Pi 5 · ship CSE' },
-  { id: 'coast', x: 190, title: 'Coast', sub: 'edge CSE · app' },
-  { id: 'shore', x: 328, title: 'Shore', sub: 'Pi 4 · shore CSE' },
+  { id: 'ship', x: 52, title: 'Ship', sub: 'Pi 5, ship CSE' },
+  { id: 'coast', x: 190, title: 'Coast', sub: 'edge CSE, app' },
+  { id: 'shore', x: 328, title: 'Shore', sub: 'Pi 4, shore CSE' },
 ] as const
 const BW = 96, BH = 74, Y = 14
 
@@ -55,7 +55,7 @@ export function NetworkPanel({ link, m, mode, held }: {
           {mode === 'anchor' ? 'Coast custody and shore confirmation are separate receipts.' : 'Baseline forwards live only: no custody, no replay.'}
         </text>
         <text x={W / 2} y={H - 10} textAnchor="middle" fontSize="10" fill={C.muted}>
-          records generated on the ship · stored at the coast · confirmed at the shore
+          records generated on the ship, stored at the coast, confirmed at the shore
         </text>
       </svg>
     </section>

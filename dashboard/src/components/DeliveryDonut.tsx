@@ -5,7 +5,7 @@ import { useMemo } from 'react'
 import type { Delivered } from '../types'
 import { EChart } from './EChart'
 import { isHeld } from '../lib/metrics'
-import { C, FONT } from '../theme'
+import { C, FONT, TOOLTIP } from '../theme'
 
 const SLICES = [
   { key: 'live', name: 'Delivered live', color: '#3f9ad0' },
@@ -29,6 +29,7 @@ export function DeliveryDonut({ events, now, heldOnShip, waitingAtCoast, lost, h
     return {
       textStyle: { fontFamily: FONT },
       tooltip: {
+        ...TOOLTIP,
         trigger: 'item',
         valueFormatter: (v: number) => `${v.toLocaleString('en-US')} records`,
       },

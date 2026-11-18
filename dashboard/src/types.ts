@@ -87,7 +87,7 @@ export interface Run {
   mode: 'anchor' | 'baseline'
   start: number
   end: number
-  /** every event the ship generated (mock: ground truth) · live: every event that reached the coast or the shore */
+  /** every event the ship generated (mock: ground truth), live: every event that reached the coast or the shore */
   events: Delivered[]
   links: LinkChange[]
   commands: Command[]

@@ -3,7 +3,7 @@ import { EChart } from './EChart'
 import { bands } from './bands'
 import { isHeld } from '../lib/metrics'
 import type { Delivered, LinkChange } from '../types'
-import { C, FONT, LINK, clock } from '../theme'
+import { C, FONT, LINK, clock, TOOLTIP } from '../theme'
 
 const BUCKET = 10_000
 
@@ -49,7 +49,7 @@ export function ContinuityTimeline(props: {
       textStyle: { fontFamily: FONT },
       animation: false,
       grid: { left: 44, right: 48, top: 40, bottom: 26 },
-      tooltip: { trigger: 'axis' },
+      tooltip: { ...TOOLTIP, trigger: 'axis' },
       legend: { top: 4, left: 40, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 11, color: C.muted } },
       xAxis: { type: 'time', min: start, max: end, axisLabel: { fontSize: 10, color: C.muted, formatter: (v: number) => clock(v).slice(0, 5) },
         axisLine: { lineStyle: { color: C.line } } },
@@ -64,7 +64,7 @@ export function ContinuityTimeline(props: {
   return (
     <section className="panel">
       <header className="panel-head"><h3>Data continuity</h3>
-        <span>bars: records reaching the shore per 10 s (left) · lines: records still waiting (right) · amber band = A down · red band = B down</span></header>
+        <span>bars are records reaching the shore per 10 s (left), lines are records still waiting (right), amber band = A down, red band = B down</span></header>
       <EChart option={option} height={height} />
     </section>
   )

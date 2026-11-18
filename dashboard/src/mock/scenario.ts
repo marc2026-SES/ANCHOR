@@ -278,35 +278,35 @@ function feed(mode: 'anchor' | 'baseline', events: Delivered[], cmd: Command): F
   const at = (m: number) => START + m * MIN
   const shore = (pred: (e: Delivered) => boolean) => events.find(pred)?.shoreAt ?? undefined
   f.push({ t: at(0), kind: 'link', text: 'Links A (ship ↔ coast) and B (coast ↔ shore) up' })
-  f.push({ t: at(4), kind: 'link', text: mode === 'anchor' ? 'Link A down · the ship keeps its originals' : 'Link A down · ship data is no longer forwarded' })
+  f.push({ t: at(4), kind: 'link', text: mode === 'anchor' ? 'Link A down, the ship keeps its originals' : 'Link A down, ship data is no longer forwarded' })
   f.push({ t: cmd.issuedAt, kind: 'command', text: `Shore issued ${cmd.commandId}: reportingGroup → ${cmd.intervalMs} ms for ${cmd.durationMs / 1000} s, valid ${(cmd.expiresAt - cmd.issuedAt) / 60_000} min` })
   if (cmd.cachedAtCoast) f.push({ t: cmd.cachedAtCoast, kind: 'command', text: 'Command stored at the coast (waits there for the ship)' })
   f.push({ t: at(6), kind: 'link', text: 'Link B down' })
   for (const e of events.filter(e => e.kind === 'incident')) {
     f.push({ t: e.generatedAt, seen: e.shoreAt ?? undefined, kind: 'incident',
-      text: e.payload.status === 'opened' ? `Tilt incident opened on the ship (roll ${e.payload.roll}°, ≥ 25° for 2 s)` + (e.shoreAt ? '' : ' · never reached shore')
-        : 'Tilt incident recovered (≤ 15° for 2 s)' + (e.shoreAt ? '' : ' · never reached shore') })
+      text: e.payload.status === 'opened' ? `Tilt incident opened on the ship (roll ${e.payload.roll}°, ≥ 25° for 2 s)` + (e.shoreAt ? '' : ', never reached shore')
+        : 'Tilt incident recovered (≤ 15° for 2 s)' + (e.shoreAt ? '' : ', never reached shore') })
   }
-  f.push({ t: at(9), kind: 'link', text: mode === 'anchor' ? 'Link A up · ship backlog to the coast, critical first' : 'Link A up · B still down, nothing reaches shore' })
+  f.push({ t: at(9), kind: 'link', text: mode === 'anchor' ? 'Link A up, ship backlog to the coast, critical first' : 'Link A up, B still down, nothing reaches shore' })
   if (cmd.appliedAt) {
     f.push({ t: cmd.deliveredToShip!, kind: 'command', text: 'Ship picked the command up from the coast (pollingChannel)' })
     f.push({ t: cmd.appliedAt, seen: shore(e => e.kind === 'commandResult') , kind: 'command', text: 'Applied on BRIDGE and ENGINE (ESP32 results)' })
   } else {
-    f.push({ t: cmd.expiresAt, kind: 'command', text: 'Command expired before any path reached the ship · not applied' })
+    f.push({ t: cmd.expiresAt, kind: 'command', text: 'Command expired before any path reached the ship, not applied' })
   }
   const ack = events.find(e => e.kind === 'incidentAck')
   if (ack) f.push({ t: ack.generatedAt, seen: ack.shoreAt ?? undefined, kind: 'incident', text: `Coast operator acknowledged the tilt incident` })
   f.push({ t: at(11), kind: 'link', text: 'Link A down' })
-  f.push({ t: at(11.5), kind: 'link', text: mode === 'anchor' ? 'Link B up · coast forwards what it holds while the ship is away' : 'Link B up · A still down' })
+  f.push({ t: at(11.5), kind: 'link', text: mode === 'anchor' ? 'Link B up, coast forwards what it holds while the ship is away' : 'Link B up, A still down' })
   if (mode === 'anchor') {
     const held = events.filter(e => e.coastAt !== null && e.coastAt < at(11.5) && e.shoreAt !== null && e.shoreAt >= at(11.5))
     const last = held.reduce((m, e) => Math.max(m, e.shoreAt!), 0)
     if (last) f.push({ t: last, kind: 'delivery', text: `Shore confirmed ${held.length.toLocaleString('en-US')} records held at the coast` })
   }
-  f.push({ t: at(14), kind: 'link', text: mode === 'anchor' ? 'Link A up · rest of the ship backlog flows, final receipts go back to the ship' : 'Links A and B up again' })
+  f.push({ t: at(14), kind: 'link', text: mode === 'anchor' ? 'Link A up, rest of the ship backlog flows, final receipts go back to the ship' : 'Links A and B up again' })
   const reboot = events.find(e => e.deviceId === 'engine' && e.bootId === 'e01d59a7c3f2b846')
   if (reboot) f.push({ t: reboot.generatedAt, seen: reboot.shoreAt ?? undefined, kind: 'delivery',
-    text: 'ENGINE rebooted · new bootId, seq restarts at 0 (not counted as loss)' })
+    text: 'ENGINE rebooted, new bootId, seq restarts at 0 (not counted as loss)' })
   f.push({ t: at(2), kind: 'security', text: 'Denied 4103: CAnchorDashboard tried to write bridge/attitude (sample)' })
   f.push({ t: at(17), kind: 'security', text: 'Denied 401: control API called without the token (sample)' })
   return f
