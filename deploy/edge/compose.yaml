@@ -29,5 +29,19 @@ services:
       - ./core.container.json:/config/edge.json:ro
       - ../../.runtime-edge:/secrets:ro
     command: ["--config", "/config/edge.json", "serve"]
+  edge-dds-ipe:
+    profiles: ["dds"]
+    user: "${ANCHOR_UID:-1000}:${ANCHOR_GID:-1000}"
+    build:
+      context: ../..
+      dockerfile: deploy/edge/Dockerfile.dds
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - edge-cse
+    volumes:
+      - ./dds.container.json:/config/dds.container.json:ro
+      - ./core.container.json:/config/core.container.json:ro
+      - ../../.runtime-edge/tls:/secrets/tls:ro
 volumes:
   edge-cse-data:

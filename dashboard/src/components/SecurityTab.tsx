@@ -1,6 +1,6 @@
 import { ACPS, DENY_TESTS, TRANSPORT } from '../security/acp'
 
-const OPS: Record<string, string> = { C: 'create', 'C(SUB)': 'create subscription only: acod/chty=[23]', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
+const OPS: Record<string, string> = { C: 'create', 'C(SUB)': 'create subscription only: acod/chty=[23]', 'C(CIN)': 'create content instance only: acod/chty=[4]', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
 
 export function SecurityTab() {
   return (
@@ -29,7 +29,7 @@ export function SecurityTab() {
             </tbody>
           </table>
         </div>
-        <p className="note">C create · C(SUB) create subscription only · R retrieve · U update · D delete · N notify · Di discover. Conditional create does not permit CIN writes.</p>
+        <p className="note">C create · C(SUB) create subscription only · C(CIN) create content instance only · R retrieve · U update · D delete · N notify · Di discover. Each conditional grant permits only its named child type.</p>
       </section>
 
       <div className="row two">

@@ -7,6 +7,10 @@ export interface Grant { who: string; ops: string }
 export interface AcpRow { name: string; on: string; cse: string; grants: Grant[] }
 
 export const ACPS: AcpRow[] = [
+  { name: 'acp-ddsIpe', on: 'native DDS IPE AE (edge option)', cse: 'coast',
+    grants: [{ who: 'CAnchorDDSIPE · CAnchorEdge · CAnchorDashboard', ops: 'R Di' }] },
+  { name: 'acp-ddsIpe-vibration · acp-ddsIpe-status', on: 'raw vibration windows and DDS status; no command or main-journal access', cse: 'coast',
+    grants: [{ who: 'CAnchorDDSIPE', ops: 'R Di C(CIN)' }, { who: 'CAnchorEdge · CAnchorDashboard', ops: 'R Di' }] },
   { name: 'acp-anchor · acp-anchor-dispatches · -quarantine · -ruleState · -audit', on: 'anchor (core AE) and internal journals', cse: 'ship · coast · shore',
     grants: [{ who: 'core of that site', ops: 'all' }] },
   { name: 'acp-anchor-events', on: 'anchor/events', cse: 'ship',
@@ -61,6 +65,7 @@ export const DENY_TESTS: { id: string; test: string; who: string; request: strin
 ]
 
 export const TRANSPORT: { hop: string; how: string; open?: boolean }[] = [
+  { hop: 'Ship DDS publisher → coastal IPE (UDP)', how: 'Native Cyclone DDS, six configurable QoS policies; defaults bind to loopback. DDS Security is not enabled: use an isolated trusted link or an authenticated encrypted tunnel. CSE ACP protects only the HTTPS side.', open: true },
   { hop: 'Control API (HTTPS 8790)', how: 'Operator token and a separate status-only token; the latter permits GET /status counters and excludes raw events, location and diagnostics' },
   { hop: 'CSE ↔ CSE, core → CSE (HTTPS)', how: 'CA and hostname verification enabled; binding the authenticated caller to its Originator remains open', open: true },
   { hop: 'ESP32 → ship CSE (MQTTS 8883)', how: 'Client certificates required, allow_anonymous=false; binding certificate identity to topics and Originator remains open', open: true },
