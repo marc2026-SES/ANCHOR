@@ -80,9 +80,47 @@ def test_every_policy_self_privilege_is_admin_only(cse_rows, role):
     assert policies
     assert all(r['rn'].startswith('acp-') for r in policies)
     assert all(r['pvs'] == {'acr':[{'acor':['CAdmin'],'acop':63}]} for r in policies)
-    for origin in (ORIGINS[role], 'CAnchorDashboard', 'CBridge'):
+    for origin in (ORIGINS[role], 'CAnchorDashboard', 'CBridge', 'CAnchorAgent'):
         assert not permission(server, 'anchor/events', origin, 4, self_permission=True)
     assert permission(server, 'anchor/events', 'CAdmin', 4, self_permission=True)
+
+
+@pytest.mark.parametrize('target', [
+    'bridge/attitude', 'bridge/position', 'engine/vibration',
+    'engine/gas', 'cargo/climate', 'cargo/hatch',
+])
+def test_agent_can_only_read_and_discover_the_six_sensors(cse_rows, target):
+    server, _ = cse_rows['ship']
+    for op in (2, 32):
+        assert permission(server, target, 'CAnchorAgent', op)
+    for op, ty in ((1, 4), (1, 23), (4, None), (8, None), (16, None)):
+        assert not permission(server, target, 'CAnchorAgent', op, ty)
+
+
+def test_agent_grants_are_scoped_and_survive_rebootstrap(cse_rows):
+    server, cfg = cse_rows['ship']
+    client = server.client('CAnchorShip')
+    client.put_record(client.root + '/bridge/position', 'agent-read-probe', {'lat': 35.0, 'lon': 129.0})
+    bootstrap(cfg, client)
+    bootstrap(cfg, client)
+    assert resource(client.get(client.root + '/agent'))['aei'] == 'CAnchorAgent'
+    assert json.loads(resource(client.get(client.root + '/bridge/position/agent-read-probe'))['con']) == {
+        'lat': 35.0, 'lon': 129.0}
+    allowed = {'agent', 'bridge', 'engine', 'cargo', 'bridge/attitude', 'bridge/position',
+               'engine/vibration', 'engine/gas', 'cargo/climate', 'cargo/hatch'}
+    for role, (node, _) in cse_rows.items():
+        for path, row in node.rows.items():
+            if not row.get('acpi'):
+                continue
+            target = path.split('/', 1)[1]
+            expected = role == 'ship' and target in allowed
+            for op in (2, 32):
+                assert permission(node, target, 'CAnchorAgent', op) is expected, (role, target, op)
+            for op, ty in ((1, 4), (1, 23), (4, None), (8, None), (16, None)):
+                assert not permission(node, target, 'CAnchorAgent', op, ty), (role, target, op)
+            assert not permission(node, target, 'CAnchorAgent', 4, self_permission=True)
+    # GPS was authorized for the AI identity, not for the dashboard identity.
+    assert not permission(server, 'bridge/position', 'CAnchorDashboard', 2)
 
 
 def test_per_resource_policies_and_existing_fcnt_migration_preserve_data(cse_rows):

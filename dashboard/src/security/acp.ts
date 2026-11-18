@@ -26,7 +26,11 @@ export const ACPS: AcpRow[] = [
   { name: 'acp-<node> · acp-<node>-<sensor> · acp-<node>-commandResults', on: 'bridge · engine · cargo AEs and their sensor containers', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine · CCargo (own node)', ops: 'C R U' }, { who: 'CAnchorDashboard', ops: 'R' }] },
   { name: 'acp-bridge-position', on: 'bridge/position', cse: 'ship',
-    grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge', ops: 'C R U' }] },
+    grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge', ops: 'C R U' }, { who: 'CAnchorAgent', ops: 'R Di' }] },
+  { name: 'acp-agent · acp-bridge · acp-engine · acp-cargo', on: 'AI identity AE and sensor parent AEs (additional reader grant)', cse: 'ship',
+    grants: [{ who: 'CAnchorAgent', ops: 'R Di' }] },
+  { name: 'acp-bridge-attitude · acp-engine-vibration · acp-engine-gas · acp-cargo-climate · acp-cargo-hatch', on: 'Five other sensor CNTs (additional reader grant); excludes commandResults and SDT', cse: 'ship',
+    grants: [{ who: 'CAnchorAgent', ops: 'R Di' }] },
   { name: 'acp-bridge-command · acp-engine-command', on: '<node>/command (reportingGroup members)', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine (own node)', ops: 'R C(SUB)' }] },
   { name: 'acp-anchor-reportingGroup', on: 'anchor/reportingGroup', cse: 'ship',
@@ -50,11 +54,15 @@ export const DENY_TESTS: { id: string; test: string; who: string; request: strin
   { id: 'T13', test: 'Device forges its own command', who: 'CBridge', request: 'CREATE cin · ship bridge/command', expect: '4103' },
   { id: 'T14', test: 'Read-only token attempts a command', who: 'status token', request: 'POST :8790/commands', expect: '403' },
   { id: 'T15', test: 'Application changes its own policy', who: 'CAnchorShore', request: 'UPDATE · shore acp-anchor-events', expect: '4103' },
+  { id: 'T16', test: 'Control: AI reads GPS, one of six authorized sensors', who: 'CAnchorAgent', request: 'RETRIEVE ship bridge/position/la', expect: '2000' },
+  { id: 'T17', test: 'AI forges a sensor record', who: 'CAnchorAgent', request: 'CREATE cin · ship bridge/attitude', expect: '4103' },
+  { id: 'T18', test: 'AI subscribes without create permission', who: 'CAnchorAgent', request: 'CREATE sub · ship engine/vibration', expect: '4103' },
+  { id: 'T19', test: 'AI reads a command container', who: 'CAnchorAgent', request: 'RETRIEVE ship bridge/command', expect: '4103' },
 ]
 
 export const TRANSPORT: { hop: string; how: string; open?: boolean }[] = [
   { hop: 'Control API (HTTPS 8790)', how: 'Operator token and a separate status-only token; the latter permits GET /status counters and excludes raw events, location and diagnostics' },
   { hop: 'CSE ↔ CSE, core → CSE (HTTPS)', how: 'CA and hostname verification enabled; binding the authenticated caller to its Originator remains open', open: true },
   { hop: 'ESP32 → ship CSE (MQTTS 8883)', how: 'Client certificates required, allow_anonymous=false; binding certificate identity to topics and Originator remains open', open: true },
-  { hop: 'Position and AI access', how: 'Ship dashboard cannot read position; shore dashboard can read location-containing events. AI has no journal grant. Do not pass dashboard credentials or raw events to an LLM.', open: true },
+  { hop: 'Position and AI access', how: 'CAnchorAgent can retrieve and discover six ship sensors, including GPS position. No writes, subscriptions, commands or journal grants. Ship dashboard still cannot read position; shore dashboard can read location-containing events. Use the separate AI identity.' },
 ]
