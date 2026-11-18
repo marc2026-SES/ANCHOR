@@ -45,14 +45,14 @@ export function buildFeed(events: Delivered[], links: LinkChange[], commands: Co
   const linkName: Record<LinkId, string> = { A: 'Link A (ship ↔ coast)', B: 'Link B (coast ↔ shore)' }
   for (const l of links) {
     feed.push({ t: l.t, kind: 'link', text: `${linkName[l.link]} ${l.up ? 'up' : 'down'}` +
-      (l.source === 'inferred' ? ' · inferred from a gap in the data' : '') })
+      (l.source === 'inferred' ? ', inferred from a gap in the data' : '') })
   }
   const firstBoot = new Map<string, Map<string, number>>()
   for (const e of events) {
     const seen = e.shoreAt ?? undefined
     if (e.kind === 'incident') {
       feed.push({ t: e.generatedAt, seen, kind: 'incident', text: e.payload.status === 'opened'
-        ? `Tilt incident opened · roll ${deg(e.payload.roll)} pitch ${deg(e.payload.pitch)}`
+        ? `Tilt incident opened, roll ${deg(e.payload.roll)} pitch ${deg(e.payload.pitch)}`
         : 'Tilt incident recovered' })
     } else if (e.kind === 'incidentAck') {
       feed.push({ t: e.generatedAt, seen, kind: 'incident',
@@ -60,7 +60,7 @@ export function buildFeed(events: Delivered[], links: LinkChange[], commands: Co
     } else if (e.kind === 'commandResult') {
       feed.push({ t: Number(e.payload.appliedAtMs) || e.generatedAt, seen, kind: 'command',
         text: `${e.deviceId} ${String(e.payload.status)} ${short(String(e.payload.commandId))}` +
-          (e.payload.status === 'applied' ? ` · ${String(e.payload.appliedIntervalMs)} ms` : '') })
+          (e.payload.status === 'applied' ? `, ${String(e.payload.appliedIntervalMs)} ms` : '') })
     }
     if (e.seq !== null && (e.kind === 'measurement' || e.kind === 'commandResult')) {
       const boots = firstBoot.get(e.deviceId) ?? new Map<string, number>()
@@ -70,11 +70,11 @@ export function buildFeed(events: Delivered[], links: LinkChange[], commands: Co
   }
   for (const [device, boots] of firstBoot) {
     const starts = [...boots.entries()].sort((a, b) => a[1] - b[1]).slice(1)
-    for (const [boot, t] of starts) feed.push({ t, kind: 'delivery', text: `${device} rebooted · new bootId ${boot}, seq restarts at 0` })
+    for (const [boot, t] of starts) feed.push({ t, kind: 'delivery', text: `${device} rebooted, new bootId ${boot}, seq restarts at 0` })
   }
   for (const c of commands) {
     feed.push({ t: c.issuedAt, kind: 'command',
-      text: `Command ${short(c.commandId)} issued · ${c.target} every ${c.intervalMs} ms for ${c.durationMs / 1000} s` })
+      text: `Command ${short(c.commandId)} issued, ${c.target} every ${c.intervalMs} ms for ${c.durationMs / 1000} s` })
     if (c.cachedAtCoast !== null) feed.push({ t: c.cachedAtCoast, kind: 'command', text: `Command ${short(c.commandId)} stored at coast` })
   }
   return feed

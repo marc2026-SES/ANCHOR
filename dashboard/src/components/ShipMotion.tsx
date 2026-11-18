@@ -31,13 +31,13 @@ export function ShipMotion({ events, now, height = 230 }: { events: Delivered[];
     <section className="panel ship-motion">
       <header className="panel-head">
         <h3>Ship attitude</h3>
-        <span>BRIDGE MPU6050 as received at the shore · freezes while the ship is cut off</span>
+        <span>BRIDGE MPU6050 as received at the shore (freezes while the ship is cut off)</span>
       </header>
       <div className={`ship-stage${stale ? ' stale' : ''}`} style={{ height }}>
-        <svg viewBox="0 0 340 190" preserveAspectRatio="xMidYMid meet" role="img"
+        <svg viewBox="78 32 184 140" preserveAspectRatio="xMidYMid meet" role="img"
           aria-label={roll === null ? 'no attitude data yet' : `roll ${roll}°, pitch ${pitch}°`}>
           {/* horizon reference */}
-          <line x1="12" y1="112" x2="328" y2="112" className="horizon" />
+          <line x1="78" y1="112" x2="262" y2="112" className="horizon" />
           <ellipse cx="170" cy="151" rx="64" ry="6.5" className="boat-shadow" />
           {/* the boat (rolls about the waterline, bobs with pitch) */}
           <g className="boat" style={{ transform: `translateY(${bob}px) rotate(${shownRoll}deg)` }}>
@@ -51,11 +51,6 @@ export function ShipMotion({ events, now, height = 230 }: { events: Delivered[];
               <circle cx="170" cy="42" r="4" className="beacon" />
             </g>
           </g>
-          {/* water: two drifting decorative wave bands drawn above the hull base */}
-          <g className="waves">
-            <path className="wave w1" d="M -340 118 Q -297 110 -255 118 T -170 118 T -85 118 T 0 118 T 85 118 T 170 118 T 255 118 T 340 118 T 425 118 T 510 118 T 595 118 T 680 118 L 680 190 L -340 190 Z" />
-            <path className="wave w2" d="M -340 128 Q -297 121 -255 128 T -170 128 T -85 128 T 0 128 T 85 128 T 170 128 T 255 128 T 340 128 T 425 128 T 510 128 T 595 128 T 680 128 L 680 190 L -340 190 Z" />
-          </g>
         </svg>
         <div className="ship-readout">
           <div><dt>Roll</dt><dd className={tilted ? 'bad' : ''}>{roll === null ? '—' : `${roll.toFixed(1)}°`}</dd></div>
@@ -63,7 +58,7 @@ export function ShipMotion({ events, now, height = 230 }: { events: Delivered[];
           <div><dt>Seen</dt><dd>{age === null ? 'no data' : `${fmtMs(age)} ago`}</dd></div>
         </div>
         {tilted && <span className="ship-flag">TILT ≥ {TILT_DEG}°</span>}
-        {stale && age !== null && <span className="ship-stale-note">frozen · last report {fmtMs(age)} ago</span>}
+        {stale && age !== null && <span className="ship-stale-note">frozen, last report {fmtMs(age)} ago</span>}
       </div>
       <label className="ship-toggle">
         <input type="checkbox" checked={exaggerate} onChange={e => setExaggerate(e.target.checked)} />

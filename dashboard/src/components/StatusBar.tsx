@@ -1,6 +1,7 @@
 import type { LinkId, LinkState } from '../types'
 import { C, LINK, clock } from '../theme'
 import { fmtMs, n } from '../lib/metrics'
+import { RollText } from '../lib/roll'
 
 function LinkPill({ id, state, inferred }: { id: LinkId; state: LinkState; inferred?: boolean }) {
   const bg = state === 'up' ? C.up : state === 'down' ? C.down : C.muted
@@ -32,14 +33,14 @@ export function StatusBar(props: {
         </svg>
         <div>
           <strong>ANCHOR</strong>
-          <span>Shore dashboard · {runId}</span>
+          <span>Shore dashboard ({runId})</span>
         </div>
       </div>
       <LinkPill id="A" state={link.A} inferred={props.inferred?.A} />
       <LinkPill id="B" state={link.B} inferred={props.inferred?.B} />
       <div className="stat"><span>Last record at shore</span><b className={silence !== null && silence > 10_000 ? 'warn' : ''}>{fmtMs(silence)} ago</b></div>
-      <div className="stat"><span>Held on ship</span><b>{heldOnShip === null ? '—' : n(heldOnShip)}</b></div>
-      <div className="stat"><span>Waiting at coast</span><b>{waitingAtCoast === null ? '—' : n(waitingAtCoast)}</b></div>
+      <div className="stat"><span>Held on ship</span><b>{heldOnShip === null ? '—' : <RollText text={n(heldOnShip)} />}</b></div>
+      <div className="stat"><span>Waiting at coast</span><b>{waitingAtCoast === null ? '—' : <RollText text={n(waitingAtCoast)} />}</b></div>
       <div className="stat"><span>Time (UTC)</span><b>{clock(now)}</b></div>
       {onMode ? (
         <div className="mode" role="group" aria-label="Mode">
@@ -47,7 +48,7 @@ export function StatusBar(props: {
           <button className={mode === 'baseline' ? 'on' : ''} onClick={() => onMode('baseline')}>Baseline</button>
         </div>
       ) : (
-        <div className="live-badge" title="Data from the Shore Monitor AE"><i />LIVE · {mode === 'anchor' ? 'ANCHOR' : 'Baseline'}</div>
+        <div className="live-badge" title="Data from the Shore Monitor AE"><i />LIVE {mode === 'anchor' ? 'ANCHOR' : 'Baseline'}</div>
       )}
     </header>
   )
@@ -78,7 +79,7 @@ export function Playback(props: {
           {[1, 10, 30, 60].map(s => <option key={s} value={s}>{s}×</option>)}
         </select>
       )}
-      <span className="hint">{live ? live.hint : 'dummy data · demo run in the README shooting order (A and B cut separately)'}</span>
+      <span className="hint">{live ? live.hint : 'dummy data, demo run in the README shooting order (A and B cut separately)'}</span>
     </div>
   )
 }

@@ -11,7 +11,7 @@ export function EventLog({ feed, now }: { feed: FeedItem[]; now: number }) {
     .sort((a, b) => b.t - a.t)
   return (
     <section className="panel events">
-      <header className="panel-head"><h3>Events</h3><span>newest first · when it happened · when the shore saw it</span></header>
+      <header className="panel-head"><h3>Events</h3><span>newest first, when it happened and when the shore saw it</span></header>
       <ul>
         {shown.length === 0 && <li className="empty">No events yet</li>}
         {shown.map((e, i) => (
@@ -20,7 +20,7 @@ export function EventLog({ feed, now }: { feed: FeedItem[]; now: number }) {
             <span className="ev-time">{clock(e.t)}</span>
             <span className="ev-text">{e.text}
               {e.seen !== undefined && e.seen - e.t > 10_000 && (
-                <em> · {e.seen <= now ? `at shore ${clock(e.seen)}` : 'not at shore yet'}</em>)}
+                <em>, {e.seen <= now ? `at shore ${clock(e.seen)}` : 'not at shore yet'}</em>)}
             </span>
           </li>
         ))}

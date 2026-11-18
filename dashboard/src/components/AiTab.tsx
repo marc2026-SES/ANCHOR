@@ -10,7 +10,7 @@ const STATE: Record<AiState, { label: string; tone: 'ok' | 'warn' | 'bad' | 'off
   no_ai: { label: 'AI not running', tone: 'off', hint: 'anchorAI is on neither the shore nor the ship CSE yet' },
   forbidden: { label: 'No permission', tone: 'bad', hint: 'ACP: CAnchorDashboard may not read anchorAI' },
   ship_unreachable: { label: 'Ship not reachable', tone: 'off',
-    hint: 'no new AI results reach the shore while the ship is cut off (link A); they show when it is back · this is not an AI failure' },
+    hint: 'no new AI results reach the shore while the ship is cut off (link A); they show when it is back (not an AI failure)' },
   error: { label: 'Read error', tone: 'bad', hint: 'a CSE answered with an error' },
   starting: { label: 'Checking…', tone: 'off', hint: 'first read pending' },
 }
@@ -21,11 +21,11 @@ const VALUE: Record<string, string> = {
 }
 const STAT: Record<string, string> = { mean: 'level', std: 'spread', slope: 'trend', max: 'max', min: 'min' }
 
-/** "vibration.vib_rms_g.std" → "Vibration RMS · spread" (raw name in the tooltip) */
+/** "vibration.vib_rms_g.std" → "Vibration RMS, spread" (raw name in the tooltip) */
 export function featureLabel(feature: string) {
   const [c, v, s] = feature.split('.')
   if (!c || !v || !s) return feature
-  return `${CONTAINER[c] ?? c} ${VALUE[v] ?? v} · ${STAT[s] ?? s}`
+  return `${CONTAINER[c] ?? c} ${VALUE[v] ?? v}, ${STAT[s] ?? s}`
 }
 
 /** "ENGINE/gas.mq2_v" → "ENGINE gas voltage" */
@@ -67,8 +67,8 @@ export function AiAlerts({ ai, now, onOpen }: { ai: AiInfo | null | undefined; n
       ))}
       {crit.map(a => (
         <button key={a.eventId} className="ai-alert crit" onClick={onOpen}>
-          <b>AI anomaly</b> {a.subsystem} critical · score {a.score.toFixed(2)}
-          {a.topFeatures?.[0] && <small> · {featureLabel(a.topFeatures[0].feature)}</small>} · {fmtMs(now - a.at)} ago
+          <b>AI anomaly</b> {a.subsystem} critical, score {a.score.toFixed(2)}
+          {a.topFeatures?.[0] && <small>, {featureLabel(a.topFeatures[0].feature)}</small>}, {fmtMs(now - a.at)} ago
         </button>
       ))}
     </div>
@@ -81,7 +81,7 @@ function StatusCard({ ai, now, live }: { ai: AiInfo; now: number; live: boolean 
   return (
     <section className="panel ai-status">
       <header className="panel-head"><h3>AI status</h3><span>{live
-        ? `${ai.source === 'ship' ? 'ship CSE anchorAI' : ai.source === 'shore' ? 'shore CSE copy of anchorAI' : 'anchorAI'} · aiStatus every 30 s`
+        ? `${ai.source === 'ship' ? 'ship CSE anchorAI' : ai.source === 'shore' ? 'shore CSE copy of anchorAI' : 'anchorAI'}, aiStatus every 30 s`
         : 'demo data'}</span></header>
       <div className={`ai-state ${st.tone}`} title={ai.error ?? st.hint}>
         <b>{st.label}</b><small>{ai.error ?? st.hint}</small>
@@ -108,7 +108,7 @@ function StatusCard({ ai, now, live }: { ai: AiInfo; now: number; live: boolean 
 function AnomalyTable({ rows, now }: { rows: AiAnomaly[]; now: number }) {
   return (
     <section className="panel">
-      <header className="panel-head"><h3>Anomalies</h3><span>created only when the AI sees one · top features = why (larger |z| = stronger)</span></header>
+      <header className="panel-head"><h3>Anomalies</h3><span>created only when the AI sees one, top features say why (larger |z| = stronger)</span></header>
       {rows.length === 0 ? <p className="empty">No anomaly in this run.</p> : (
         <table className="ai-table">
           <thead><tr><th>Time (UTC)</th><th>Subsystem</th><th>Level</th><th>Score</th><th>Why</th></tr></thead>
@@ -137,7 +137,7 @@ function Forecasts({ ai, now }: { ai: AiInfo; now: number }) {
   const links = ai.linkForecast.filter(l => l.at <= now)
   return (
     <section className="panel">
-      <header className="panel-head"><h3>Forecasts</h3><span>threshold before it is crossed · link loss before it happens (GPS fix only)</span></header>
+      <header className="panel-head"><h3>Forecasts</h3><span>threshold before it is crossed, link loss before it happens (GPS fix only)</span></header>
       {prog.length === 0 && links.length === 0 && <p className="empty">No forecast in this run.</p>}
       <ul className="ai-list">
         {prog.map((p: AiPrognosis) => {
@@ -145,7 +145,7 @@ function Forecasts({ ai, now }: { ai: AiInfo; now: number }) {
           return (
             <li key={p.eventId}>
               <span className={`pill ${left > 0 ? 'ai-warn' : 'ai-normal'}`}>{left > 0 ? `in ${mmss(left)}` : 'time passed'}</span>
-              {channelLabel(p.channel)} → {p.threshold ?? 'limit'} <small>(now {p.value ?? '?'}, {p.slopePerMin ?? '?'}/min · {clock(p.at)})</small>
+              {channelLabel(p.channel)} → {p.threshold ?? 'limit'} <small>(now {p.value ?? '?'}, {p.slopePerMin ?? '?'}/min, {clock(p.at)})</small>
             </li>
           )
         })}
@@ -153,7 +153,7 @@ function Forecasts({ ai, now }: { ai: AiInfo; now: number }) {
           <li key={l.eventId}>
             <span className="pill ai-link">{l.type.replace('_', ' ')}</span>
             {l.mode?.toUpperCase()} {l.etaS !== undefined && l.type === 'loss_predicted' ? `loss expected ${mmss(l.etaS * 1000)} after ${clock(l.at)}` : clock(l.at)}
-            {l.routeMode && <small> · {l.routeMode}</small>}
+            {l.routeMode && <small> ({l.routeMode})</small>}
           </li>
         ))}
       </ul>
@@ -201,8 +201,8 @@ function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: 
   const conflicts = fleet.conflicts.filter(c => c.at <= now)
   return (
     <section className="panel">
-      <header className="panel-head"><h3>Fleet · coastal AI</h3>
-        <span>{live ? 'coastal CSE fleetAI · fleetStatus every 30 s · conflicts when seen' : 'demo data'}</span></header>
+      <header className="panel-head"><h3>Fleet (coastal AI)</h3>
+        <span>{live ? 'coastal CSE fleetAI, fleetStatus every 30 s, conflicts when seen' : 'demo data'}</span></header>
       <div className={`ai-state ${st.tone}`} title={fleet.error ?? st.hint}><b>{st.label}</b><small>{fleet.error ?? st.hint}</small></div>
       {fleet.status && (
         <dl className="ai-facts">

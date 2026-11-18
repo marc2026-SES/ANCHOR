@@ -6,7 +6,7 @@ const RESULTS = new Map(RUN.results.map(r => [r.id, r]))
 
 function ResultPill({ r }: { r: DenyResult | undefined }) {
   if (!r) return <span className="pill pending">not run</span>
-  const label = r.status === 'pass' ? `pass · ${r.got}` : r.status === 'fail' ? `fail · got ${r.got}` : r.status
+  const label = r.status === 'pass' ? `pass (${r.got})` : r.status === 'fail' ? `fail (got ${r.got})` : r.status
   return (
     <>
       <span className={`pill ${r.status}`} title={r.note || undefined}>{label}</span>
@@ -16,10 +16,10 @@ function ResultPill({ r }: { r: DenyResult | undefined }) {
 }
 
 function ranLine(run: DenyRun) {
-  if (!run.ranAt) return 'not run yet · server/deny_tests.py'
+  if (!run.ranAt) return 'not run yet (server/deny_tests.py)'
   const at = new Date(run.ranAt).toISOString().slice(0, 16).replace('T', ' ')
   const passed = run.results.filter(r => r.status === 'pass').length
-  return `${passed}/${run.results.length} as expected · ${at} UTC · ${Object.values(run.cses).join(' · ')}`
+  return `${passed}/${run.results.length} as expected at ${at} UTC (${Object.values(run.cses).join(', ')})`
 }
 
 const OPS: Record<string, string> = { C: 'create', 'C(SUB)': 'create subscription only: acod/chty=[23]', 'C(CIN)': 'create content instance only: acod/chty=[4]', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
@@ -28,7 +28,7 @@ export function SecurityTab() {
   return (
     <div className="tab-body security">
       <section className="panel">
-        <header className="panel-head"><h3>Access control (ACP)</h3><span>one ACP per resource, named acp-&lt;resource path&gt; · ★ = added to the current bootstrap · pvs: CAdmin only</span></header>
+        <header className="panel-head"><h3>Access control (ACP)</h3><span>one ACP per resource, named acp-&lt;resource path&gt;. ★ = added to the current bootstrap. pvs: CAdmin only</span></header>
         <div className="table-wrap">
           <table className="grid acp">
             <thead><tr><th>ACP</th><th>Applied to</th><th>CSE</th><th>Who may do what</th></tr></thead>
@@ -51,12 +51,12 @@ export function SecurityTab() {
             </tbody>
           </table>
         </div>
-        <p className="note">C create · C(SUB) create subscription only · C(CIN) create content instance only · R retrieve · U update · D delete · N notify · Di discover. Each conditional grant permits only its named child type; anything not listed is denied (4103).</p>
+        <p className="note">C create, C(SUB) create subscription only, C(CIN) create content instance only, R retrieve, U update, D delete, N notify, Di discover. Each conditional grant permits only its named child type; anything not listed is denied (4103).</p>
       </section>
 
       <div className="row two">
         <section className="panel">
-          <header className="panel-head"><h3>Access-control tests</h3><span>T8 · T12 · T16 must pass, the rest must be refused · {ranLine(RUN)}</span></header>
+          <header className="panel-head"><h3>Access-control tests</h3><span>T8, T12 and T16 must pass, the rest must be refused. {ranLine(RUN)}</span></header>
           <table className="grid">
             <thead><tr><th>#</th><th>Test</th><th>Request</th><th>Expected</th><th>Result</th></tr></thead>
             <tbody>
