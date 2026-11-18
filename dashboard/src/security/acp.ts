@@ -31,6 +31,9 @@ export const ACPS: AcpRow[] = [
   { name: '★ acp-anchorAI (proposed)', on: 'anchorAI AE · aiStatus, anomaly, summary, prognosis, linkForecast', cse: 'ship · shore (copy)',
     grants: [{ who: '★ CAnchorAgent (the AI writer; not CAdmin)', ops: 'C R' },
       { who: '★ CAnchorDashboard', ops: 'R Di' }] },
+  { name: '★ acp-fleetAI (proposed)', on: 'fleetAI AE · fleetStatus, conflicts', cse: 'coast (MEC)',
+    grants: [{ who: '★ fleet-AI writer (own originator, not CAdmin)', ops: 'C R' },
+      { who: '★ CAnchorDashboard', ops: 'R Di' }] },
 ]
 
 /** Denied-request tests. server/deny_tests.py runs them against the CSEs and writes deny-results.json. */

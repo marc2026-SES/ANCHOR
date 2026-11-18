@@ -72,9 +72,9 @@ export function MeasurementTab({ anchor, baseline, note = 'demo run · full run 
       } },
       xAxis: { type: 'category', data: cats, axisLabel: { fontSize: 11, color: C.muted, interval: 0 }, axisLine: { lineStyle: { color: C.line } } },
       yAxis: { type: 'log', min: 100, max: 1_000_000, axisLabel: { fontSize: 10, color: C.muted, formatter: (v: number) => fmtMs(v) },
-        splitLine: { lineStyle: { color: '#f0f0f2' } } },
+        splitLine: { lineStyle: { color: 'rgba(126,180,214,0.12)' } } },
       series: [{ type: 'boxplot', data: boxes.map((b, i) => ({ value: b, itemStyle: {
-        color: i === 0 ? 'rgba(107,107,112,0.12)' : i === 1 ? 'rgba(0,85,129,0.15)' : 'rgba(122,95,168,0.15)',
+        color: i === 0 ? 'rgba(143,166,181,0.15)' : i === 1 ? 'rgba(63,154,208,0.18)' : 'rgba(178,115,200,0.18)',
         borderColor: i === 0 ? C.muted : i === 1 ? C.blue : C.recovered } })) }],
     }
   }, [anchor, baseline])

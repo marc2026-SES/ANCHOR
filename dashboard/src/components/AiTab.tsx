@@ -1,6 +1,6 @@
 // AI tab and alert strip. Data: the anchorAI resources (the shore CSE's copy, else the ship CSE), read by
 // the Shore Monitor as CAnchorDashboard (live), or demo samples. Field meanings follow the AI spec ("AI → 대시보드 연동 스펙").
-import type { AiAnomaly, AiInfo, AiLevel, AiPrognosis, AiState } from '../types'
+import type { AiAnomaly, AiInfo, AiLevel, AiPrognosis, AiState, FleetInfo } from '../types'
 import { clock } from '../theme'
 import { fmtMs } from '../lib/metrics'
 
@@ -180,7 +180,60 @@ function SummaryTable({ ai }: { ai: AiInfo }) {
   )
 }
 
-export function AiTab({ ai, now, live }: { ai: AiInfo | null | undefined; now: number; live: boolean }) {
+const FLEET_STATE: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad' | 'off'; hint: string }> = {
+  ok: { label: 'Fleet AI online', tone: 'ok', hint: 'fleetStatus arriving from the coastal MEC' },
+  stale: { label: 'Fleet AI not responding', tone: 'warn', hint: 'no new fleetStatus' },
+  none: { label: 'Fleet AI not running', tone: 'off', hint: 'fleetAI is not on the coastal CSE yet' },
+  forbidden: { label: 'No permission', tone: 'bad', hint: 'ACP: CAnchorDashboard may not read fleetAI' },
+  error: { label: 'Read error', tone: 'bad', hint: 'the coastal CSE answered with an error' },
+  starting: { label: 'Checking…', tone: 'off', hint: 'first read pending' },
+}
+
+/** scalar fields of a fleet record, minus bookkeeping — field names are the fleet AI's own */
+const fleetFacts = (v: Record<string, unknown>, skip: string[] = []) =>
+  Object.entries(v).filter(([k, x]) =>
+    !['eventId', 'seenAt', 'at', 'redacted', 'ts', ...skip].includes(k) &&
+    (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'))
+
+function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: boolean }) {
+  const st = FLEET_STATE[fleet.state] ?? FLEET_STATE.error
+  const age = fleet.status?.seenAt ? now - fleet.status.seenAt : null
+  const conflicts = fleet.conflicts.filter(c => c.at <= now)
+  return (
+    <section className="panel">
+      <header className="panel-head"><h3>Fleet · coastal AI</h3>
+        <span>{live ? 'coastal CSE fleetAI · fleetStatus every 30 s · conflicts when seen' : 'demo data'}</span></header>
+      <div className={`ai-state ${st.tone}`} title={fleet.error ?? st.hint}><b>{st.label}</b><small>{fleet.error ?? st.hint}</small></div>
+      {fleet.status && (
+        <dl className="ai-facts">
+          {fleetFacts(fleet.status).slice(0, 6).map(([k, v]) => (
+            <div key={k}><dt>{k}</dt><dd>{String(v)}</dd></div>
+          ))}
+          <div><dt>Last status</dt><dd>{age === null ? '—' : `${fmtMs(age)} ago`}</dd></div>
+        </dl>
+      )}
+      {conflicts.length > 0 && (
+        <table className="ai-table">
+          <thead><tr><th>Time (UTC)</th><th>Conflict</th></tr></thead>
+          <tbody>
+            {conflicts.slice(0, 8).map(c => (
+              <tr key={c.eventId ?? c.at}>
+                <td>{clock(c.at)}<small>{fmtMs(now - c.at)} ago</small></td>
+                <td>{typeof c.level === 'string' && <span className={`pill ai-${c.level === 'critical' ? 'critical' : 'warn'}`}>{c.level}</span>}{' '}
+                  {fleetFacts(c, ['level']).map(([k, v]) => (
+                    <span key={k} className="ai-feature">{k} <em>{String(v)}</em></span>
+                  ))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {fleet.state === 'ok' && conflicts.length === 0 && <p className="empty">No vessel conflict in this run.</p>}
+    </section>
+  )
+}
+
+export function AiTab({ ai, fleet, now, live }: { ai: AiInfo | null | undefined; fleet?: FleetInfo | null; now: number; live: boolean }) {
   if (!ai) {
     return (
       <div className="tab-body ai">
@@ -196,6 +249,7 @@ export function AiTab({ ai, now, live }: { ai: AiInfo | null | undefined; now: n
         <Forecasts ai={ai} now={now} />
       </div>
       <AnomalyTable rows={ai.anomaly.filter(a => a.at <= now)} now={now} />
+      {fleet && <FleetCard fleet={fleet} now={now} live={live} />}
       <SummaryTable ai={ai} />
     </div>
   )

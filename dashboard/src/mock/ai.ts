@@ -1,6 +1,6 @@
 // Demo AI results in the shapes of the AI spec ("AI → 대시보드 연동 스펙"), placed inside the demo run.
 // Live mode uses what the Shore Monitor reads from the ship CSE instead.
-import type { AiInfo, Run } from '../types'
+import type { AiInfo, FleetInfo, Run } from '../types'
 
 export function demoAi(run: Run): AiInfo {
   const t = (f: number) => run.start + (run.end - run.start) * f
@@ -33,6 +33,21 @@ export function demoAi(run: Run): AiInfo {
     ],
     linkForecast: [
       { eventId: 'lnk-demo', type: 'loss_predicted', mode: 'lte', routeMode: 'coastal', etaS: 600, at: t(0.3) },
+    ],
+  }
+}
+
+/** demo fleet-AI samples (coastal MEC): generic fields, as the fleet AI would write them */
+export function demoFleet(run: Run): FleetInfo {
+  const t = run.end
+  return {
+    state: 'ok', error: null, checkedAt: t,
+    status: {
+      eventId: 'flt-demo', seenAt: null, vessels: 3, tracking: 'AIS + GPS', mode: 'coastal',
+      updated: new Date(t).toISOString().slice(11, 19) + 'Z',
+    },
+    conflicts: [
+      { at: t - 150_000, eventId: 'cfl-demo-1', level: 'warn', vessels: 'ferry-hakata ↔ cargo-busan', cpaM: 180, tcpaS: 240 },
     ],
   }
 }

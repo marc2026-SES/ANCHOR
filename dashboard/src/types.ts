@@ -96,6 +96,7 @@ export interface Run {
   live?: LiveInfo | null
   /** AI results read from the ship CSE (live), or demo samples */
   ai?: AiInfo | null
+  fleet?: FleetInfo | null
 }
 
 // ── AI results (<root>/anchorAI/… on the shore CSE copy, else the ship CSE, read by the Shore Monitor;
@@ -118,6 +119,15 @@ export interface AiSummary {
   eventId: string; windowStart?: string; windowEnd?: string
   stats?: Record<string, { mean: number; min: number; max: number; n: number }>
 }
+// Coastal MEC fleet AI (<edge root>/fleetAI/…): field names are the fleet AI's own, shown generically.
+export type FleetState = 'ok' | 'stale' | 'none' | 'forbidden' | 'error' | 'starting'
+export interface FleetStatus { eventId?: string; seenAt?: number | null; [key: string]: unknown }
+export interface FleetConflict { at: number; eventId?: string; [key: string]: unknown }
+export interface FleetInfo {
+  state: FleetState; error: string | null; checkedAt: number | null
+  status: FleetStatus | null; conflicts: FleetConflict[]
+}
+
 export interface AiInfo {
   state: AiState; error: string | null; checkedAt: number | null
   source?: 'shore' | 'ship' | null  // where the last read came from
