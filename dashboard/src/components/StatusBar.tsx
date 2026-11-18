@@ -8,7 +8,7 @@ function LinkPill({ id, state, inferred }: { id: LinkId; state: LinkState; infer
     : inferred ? `${LINK[id].name}: inferred from data arrivals (the core cannot be reached), accurate to a few seconds`
     : LINK[id].name
   return (
-    <div className="link-pill" style={{ background: bg }} title={tip}>
+    <div className={`link-pill ${state}`} style={{ background: bg }} title={tip}>
       <small>{LINK[id].short}</small>{state === 'unknown' ? 'no report' : state}{inferred && state !== 'unknown' && <em className="inferred">inferred</em>}
     </div>
   )
@@ -23,8 +23,17 @@ export function StatusBar(props: {
   return (
     <header className="status">
       <div className="brand">
-        <strong>ANCHOR</strong>
-        <span>Shore dashboard · {runId}</span>
+        <svg className="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="5" r="2.1" fill="none" />
+          <line x1="12" y1="7.2" x2="12" y2="18.4" />
+          <line x1="8.4" y1="9.6" x2="15.6" y2="9.6" />
+          <path d="M 4.6 13.6 Q 5.6 19.4 12 19.6 Q 18.4 19.4 19.4 13.6 L 16.9 15.0" fill="none" />
+          <path d="M 4.6 13.6 L 7.1 15.0" fill="none" />
+        </svg>
+        <div>
+          <strong>ANCHOR</strong>
+          <span>Shore dashboard · {runId}</span>
+        </div>
       </div>
       <LinkPill id="A" state={link.A} inferred={props.inferred?.A} />
       <LinkPill id="B" state={link.B} inferred={props.inferred?.B} />

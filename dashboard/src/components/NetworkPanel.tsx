@@ -44,7 +44,7 @@ export function NetworkPanel({ link, m, mode, held }: {
         {line(NODES[1].x + BW / 2, NODES[2].x - BW / 2, 'B')}
         {NODES.map(nd => (
           <g key={nd.id}>
-            <rect x={nd.x - BW / 2} y={Y} width={BW} height={BH} rx="8" fill="#fff" stroke={C.line} strokeWidth="1.2" />
+            <rect x={nd.x - BW / 2} y={Y} width={BW} height={BH} rx="8" fill="rgba(95,195,239,0.07)" stroke="rgba(126,180,214,0.35)" strokeWidth="1.2" />
             <text x={nd.x} y={Y + 17} textAnchor="middle" fontSize="12" fontWeight="700" fill={C.ink}>{nd.title}</text>
             <text x={nd.x} y={Y + 31} textAnchor="middle" fontSize="9.5" fill={C.muted}>{nd.sub}</text>
             <text x={nd.x} y={Y + 53} textAnchor="middle" fontSize="16" fontWeight="700" fill={C.blue}>{counts[nd.id][0]}</text>

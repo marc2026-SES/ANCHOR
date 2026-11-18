@@ -1,0 +1,24 @@
+{
+  "_comment": "Pi4 as found on 11/18: shore CSE (ACME) plain HTTP on 127.0.0.1:8080, no core, no TLS files, user will0623. Everything loopback; view from the laptop through an SSH tunnel: ssh -L 8795:127.0.0.1:8795 will0623@<pi>. Fill edge.url when the MEC/coastal address is settled; add ship.url for AI fallback if needed.",
+  "shore": {
+    "url": "http://127.0.0.1:8080",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "timeout": 3
+  },
+  "notify": {
+    "bind": "127.0.0.1",
+    "port": 8796,
+    "url": "http://127.0.0.1:8796/notify"
+  },
+  "api": {
+    "bind": "127.0.0.1",
+    "port": 8795
+  },
+  "db": "data/live.db",
+  "run": {
+    "id": "pool-test",
+    "mode": "anchor",
+    "history_minutes": 120
+  }
+}

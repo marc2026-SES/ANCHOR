@@ -79,6 +79,8 @@ DEFAULTS = {
     # AI results (<root>/anchorAI/…), read as CAnchorDashboard: the shore CSE's copy first (same Pi, no ship
     # access needed), else the ship CSE (needs ship.url).
     'ai': {'enabled': True, 'ae': 'anchorAI', 'sources': ['shore', 'ship'], 'scan_seconds': 5, 'stale_seconds': 90},
+    # The coastal MEC fleet AI (<edge root>/fleetAI/fleetStatus, conflicts), read as CAnchorDashboard. Needs edge.url.
+    'fleet': {'enabled': True, 'ae': 'fleetAI', 'scan_seconds': 10, 'stale_seconds': 90},
 }
 
 POSITION_FIELDS = ('lat', 'lon')
@@ -143,10 +145,11 @@ def load_config(filename):
             raise SystemExit('an https notify.url needs tls.cert and tls.key for this machine '
                              '(on the shore Pi: its own tls/server.crt and tls/server.key)')
     if cfg['api']['bind'] not in ('127.0.0.1', 'localhost', '::1'):
-        if not cfg['api']['token_file']:
-            raise SystemExit('api.bind is not loopback: set api.token_file so the API is not open to the network')
+        if not cfg['api']['token_file'] and not cfg['api'].get('open'):
+            raise SystemExit('api.bind is not loopback: set api.token_file, or "open": true to serve without a '
+                             'token on a private network you trust end to end (e.g. the team tailnet)')
         if not (tls['cert'] and tls['key']):
-            raise SystemExit('api.bind is not loopback: set tls.cert and tls.key so the token never travels in clear text')
+            raise SystemExit('api.bind is not loopback: set tls.cert and tls.key so the traffic is not in clear text')
     return cfg
 
 
@@ -594,6 +597,18 @@ class AiReader:
         except OneM2MError as exc:
             if exc.rsc == 4004:
                 return
+            if exc.rsc == 4103:  # only /la is readable: keep at least the newest record
+                cin, value = self.latest(name)
+                if cin is not None and isinstance(value, dict) and isinstance(value.get('eventId'), str):
+                    ref, at = cin.get('ri'), ct_ms(cin['ct'])
+                    if ref and ref not in self.known:
+                        if self.redact and any(k in value for k in POSITION_FIELDS):
+                            value = {k: v for k, v in value.items() if k not in POSITION_FIELDS}
+                            value['redacted'] = list(POSITION_FIELDS)
+                        self.store.put_ai(ref, value['eventId'], name, at, value)
+                        self.known.add(ref)
+                        self.high[key] = max(self.high.get(key, at), at)
+                return
             raise
         for ref in refs:
             if ref in self.known:
@@ -622,6 +637,10 @@ class AiReader:
             base = f'{cse.root}/{self.ae}'
             try:
                 rsc, _ = cse.exchange('GET', base)
+                if rsc == 4103:  # the AE itself may be closed while its containers are readable: try a /la read
+                    inner, _ = cse.exchange('GET', f'{base}/aiStatus/la')
+                    if 2000 <= inner < 3000 or inner == 4004:
+                        rsc = 2000
             except (urllib.error.URLError, OSError) as exc:
                 seen[label] = describe(exc)
                 continue
@@ -736,6 +755,110 @@ class AiReader:
         return out
 
 
+class FleetReader:
+    """The coastal MEC fleet AI: <edge root>/fleetAI/fleetStatus (status every 30 s) and conflicts
+    (vessel-conflict warnings), read as CAnchorDashboard. Field names are the fleet AI's own: values are
+    stored as-is (positions redacted) and shown generically."""
+
+    def __init__(self, cse, store, cfg):
+        self.cse, self.store = cse, store
+        self.base = f"{cse.root}/{cfg['fleet']['ae']}"
+        self.stale_ms = cfg['fleet']['stale_seconds'] * 1000
+        self.redact = cfg['redact_position']
+        self.state, self.error, self.checked_at = 'starting', None, None
+        self.status, self.status_id, self.status_seen = None, None, None
+        self.known = store.ai_known()
+        self.high = None
+
+    def latest(self, name):
+        """The newest record of a container, read directly (<base>/<name>/la), as the MEC grant allows."""
+        rsc, body = self.cse.exchange('GET', f'{self.base}/{name}/la')
+        if rsc == 4004:
+            return None, None
+        if not 2000 <= rsc < 3000:
+            raise OneM2MError(rsc, body, f'{self.base}/{name}/la')
+        cin = resource(body)
+        return cin, parse_con(cin)
+
+    def keep_conflict(self, cin, value):
+        ref = cin.get('ri') or ''
+        if not ref or ref in self.known or not isinstance(value, dict):
+            return
+        at = ct_ms(cin['ct'])
+        if self.redact and any(k in value for k in POSITION_FIELDS):
+            value = {k: v for k, v in value.items() if k not in POSITION_FIELDS}
+            value['redacted'] = list(POSITION_FIELDS)
+        self.store.put_ai(ref, str(value.get('eventId') or ref), 'fleetConflict', at, value)
+        self.known.add(ref)
+        self.high = max(self.high or at, at)
+
+    def collect_conflicts(self):
+        filters = {'ty': 4, 'drt': 2}
+        if self.high is not None:
+            filters['cra'] = ms_ct(self.high - 10_000)
+        try:
+            refs = self.cse.discover(f'{self.base}/conflicts', **filters)
+        except OneM2MError as exc:
+            if exc.rsc == 4004:
+                return
+            if exc.rsc == 4103:  # only /la is granted: keep at least the newest conflict
+                cin, value = self.latest('conflicts')
+                if cin is not None:
+                    self.keep_conflict(cin, value)
+                return
+            raise
+        for ref in refs:
+            if ref in self.known:
+                continue
+            cin = resource(self.cse.get(ref))
+            try:
+                self.keep_conflict(cin, parse_con(cin))
+            except (ValueError, TypeError):
+                self.known.add(ref)
+
+    def scan(self):
+        """Read the containers directly (fleetStatus/la, conflicts): the MEC grant covers those reads,
+        not necessarily the fleetAI AE itself."""
+        try:
+            try:
+                _, value = self.latest('fleetStatus')
+            except OneM2MError as exc:
+                if exc.rsc == 4103:
+                    return self._set('forbidden',
+                                     'CAnchorDashboard may not read fleetAI/fleetStatus (ACP grant missing)')
+                raise
+            if value is None:
+                rsc, _ = self.cse.exchange('GET', self.base)
+                if rsc == 4004:
+                    return self._set('none', 'fleetAI is not on the coastal CSE: the fleet AI has not started')
+                return self._set('stale', 'no fleetStatus yet')
+            if isinstance(value, dict) and value.get('eventId') != self.status_id:
+                if self.redact:
+                    value = {k: v for k, v in value.items() if k not in POSITION_FIELDS}
+                self.status, self.status_id, self.status_seen = value, value.get('eventId'), now_ms()
+            self.collect_conflicts()
+            if self.status_seen is None:
+                return self._set('stale', 'no fleetStatus yet')
+            if now_ms() - self.status_seen > self.stale_ms:
+                return self._set('stale', f'no new fleetStatus for {round((now_ms() - self.status_seen) / 1000)} s')
+            return self._set('ok', None)
+        except OneM2MError as exc:
+            return self._set('error', describe(exc))
+        except (urllib.error.URLError, OSError) as exc:
+            return self._set('error', describe(exc))
+
+    def _set(self, state, error):
+        self.state, self.error, self.checked_at = state, error, now_ms()
+
+    def view(self, db, start, upper):
+        out = {'state': self.state, 'error': self.error, 'checkedAt': self.checked_at,
+               'status': {**self.status, 'seenAt': self.status_seen} if self.status else None, 'conflicts': []}
+        for r in db.execute("SELECT body, ct_ms FROM ai WHERE kind='fleetConflict' AND ct_ms >= ? AND ct_ms <= ? "
+                            'ORDER BY ct_ms DESC LIMIT 200', (start, upper)):
+            out['conflicts'].append({**json.loads(r['body']), 'at': r['ct_ms']})
+        return out
+
+
 class Monitor:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -759,6 +882,8 @@ class Monitor:
         self.link_seen = {}
         self.reach = {}  # role → reachable at the last poll
         self.ai = AiReader(ai_sources(cfg), self.store, cfg) if cfg['ai']['enabled'] and ai_sources(cfg) else None
+        self.fleet = (FleetReader(CSE(cfg['edge'], cfg['origin']), self.store, cfg)
+                      if cfg['fleet']['enabled'] and cfg['edge']['url'] else None)
         if not self.store.current_run():
             run = cfg['run']
             self.store.start_run(run['id'], run['mode'], now_ms() - run['history_minutes'] * 60_000)
@@ -890,6 +1015,9 @@ class Monitor:
         if self.ai:
             threads.append(threading.Thread(target=self._loop, name='ai', daemon=True,
                                             args=(self.cfg['ai']['scan_seconds'], self.ai.scan)))
+        if self.fleet:
+            threads.append(threading.Thread(target=self._loop, name='fleet', daemon=True,
+                                            args=(self.cfg['fleet']['scan_seconds'], self.fleet.scan)))
         for t in threads:
             t.start()
 
@@ -903,7 +1031,8 @@ class Monitor:
                 'ae': self.ae.view(), 'subscription': {**self.subscription.view(), 'notifications': self.notifications},
                 'journals': readers, 'cores': {role: s.view() for role, s in self.cores.items()},
                 'run': self.store.current_run(),
-                'ai': {'state': self.ai.state, 'error': self.ai.error} if self.ai else None}
+                'ai': {'state': self.ai.state, 'error': self.ai.error} if self.ai else None,
+                'fleet': {'state': self.fleet.state, 'error': self.fleet.error} if self.fleet else None}
 
     def inferred_now(self):
         """Link state from arrivals alone, on the monitor's own clock (no comparison with CSE clocks).
@@ -1043,7 +1172,8 @@ def run_view(monitor, run_id=None, after=0):
                        + inferred, key=lambda c: c['t'])
         return {'runId': row['run_id'], 'mode': row['mode'], 'start': start, 'end': end, 'now': now_ms(),
                 'rev': rev, 'after': after, 'events': events, 'commands': commands, 'links': links,
-                'live': live, 'ai': monitor.ai.view(db, start, upper) if monitor.ai else None}
+                'live': live, 'ai': monitor.ai.view(db, start, upper) if monitor.ai else None,
+                'fleet': monitor.fleet.view(db, start, upper) if monitor.fleet else None}
     finally:
         db.close()
 
@@ -1081,7 +1211,7 @@ def notify_handler(monitor):
 
 # ── HTTP: dashboard API ──────────────────────────────────────────────────────
 
-def api_handler(monitor, token, dashboard_dir=''):
+def api_handler(monitor, token, dashboard_dir='', open_api=False):
     class Api(BaseHTTPRequestHandler):
         server_version = 'anchor-shore-monitor'
 
@@ -1104,11 +1234,14 @@ def api_handler(monitor, token, dashboard_dir=''):
             self.wfile.write(data)
 
         def allowed(self):
-            """This machine itself always; anyone else only with the API token (Authorization: Bearer)."""
+            """This machine itself always; anyone else with the API token (Authorization: Bearer) — or
+            freely when "open": true (a private network trusted end to end, e.g. the team tailnet)."""
             if ipaddress.ip_address(self.client_address[0]).is_loopback:
                 return True
-            given = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-            return bool(token) and hmac.compare_digest(given.encode(), token.encode())
+            if token:
+                given = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+                return hmac.compare_digest(given.encode(), token.encode())
+            return bool(open_api)
 
         def static(self, url):
             """The built dashboard. No data in it, so no token: the page asks for the token itself."""
@@ -1227,6 +1360,12 @@ def check(cfg):
         mark = {'ok': 'ok', 'stale': '  ', 'no_ai': '  '}.get(ai.state, '--')
         where = f'{ai.label} {ai.base}' if ai.label else '/'.join(cfg['ai']['sources'])
         rows.append((mark, f"AI results {where} as {origin} (R Di)", ai.state + (f' · {ai.error}' if ai.error else '')))
+    if cfg['fleet']['enabled'] and cfg['edge']['url']:
+        fleet = FleetReader(CSE(cfg['edge'], origin), _NoStore(), cfg)
+        fleet.scan()
+        mark = {'ok': 'ok', 'stale': '  ', 'none': '  '}.get(fleet.state, '--')
+        rows.append((mark, f"fleet AI {fleet.base} as {origin} (R Di)",
+                     fleet.state + (f' · {fleet.error}' if fleet.error else '')))
     for role, c in cfg['cores'].items():
         if not c['url']:
             rows.append(('  ', f'{role} core API', 'not configured'))
@@ -1246,9 +1385,11 @@ def serve(cfg):
     tls = cfg['tls']
     api_address = (cfg['api']['bind'], cfg['api']['port'])
     if cfg['api']['bind'] in ('127.0.0.1', 'localhost', '::1'):
-        api = ThreadingHTTPServer(api_address, api_handler(monitor, token, cfg['dashboard_dir']))  # loopback
+        api = ThreadingHTTPServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
+                                               cfg['api'].get('open', False)))  # loopback
     else:
-        api = TLSServer(api_address, api_handler(monitor, token, cfg['dashboard_dir']),
+        api = TLSServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
+                                     cfg['api'].get('open', False)),
                         server_context(tls['cert'], tls['key']))
     servers = [api]
     if cfg['notify']['url']:

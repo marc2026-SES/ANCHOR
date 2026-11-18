@@ -6,9 +6,11 @@ import { StatusBar, Playback } from './components/StatusBar'
 import { KpiCards } from './components/KpiCards'
 import { Tabs, type TabId } from './components/Tabs'
 import { AiAlerts, AiTab } from './components/AiTab'
-import { demoAi } from './mock/ai'
+import { DeliveryDonut } from './components/DeliveryDonut'
+import { TopologyMap } from './components/TopologyMap'
+import { ShipMotion } from './components/ShipMotion'
+import { demoAi, demoFleet } from './mock/ai'
 import { ContinuityTimeline } from './components/ContinuityTimeline'
-import { NetworkPanel } from './components/NetworkPanel'
 import { ZoneChart, type Marker, type SeriesSpec } from './components/ZoneChart'
 import { QualityPanel } from './components/QualityPanel'
 import { EventLog } from './components/EventLog'
@@ -135,35 +137,43 @@ export default function App() {
   const atShore = useMemo(() => run.events.filter(e => e.shoreAt !== null && e.shoreAt <= now), [run, now])
   const link = linkStates(run, now, following)
   const ai = useMemo(() => (LIVE ? run.ai : demoAi(run)), [run])
+  const fleet = useMemo(() => (LIVE ? run.fleet : demoFleet(run)), [run])
   const otherMode = run.mode === 'anchor' ? 'baseline' : 'anchor'
 
   return (
     <div className="page">
       {/* always visible, whatever the tab */}
-      <StatusBar runId={run.runId} link={link} inferred={linkInferred(run, now, following)} now={now} lastAtShore={metrics.lastAtShore}
-        heldOnShip={held ? held.ship : metrics.heldOnShip} waitingAtCoast={held ? held.coast : metrics.waitingAtCoast}
-        mode={run.mode} onMode={LIVE ? undefined : setMode} />
-      {LIVE && <LiveBanner error={live.error} run={live.run} />}
-      <Playback start={start} end={end} now={now} playing={playing} speed={speed}
-        onSeek={v => { setFollowing(false); setNow(v) }} onPlay={setPlaying} onSpeed={setSpeed}
-        live={LIVE ? { following, onFollow: () => setFollowing(true),
-          hint: `live · Shore Monitor AE · run ${run.runId} since ${clock(start).slice(0, 5)} UTC · ${run.events.length.toLocaleString('en-US')} records` } : undefined} />
-      <KpiCards m={metrics} command={run.commands[run.commands.length - 1]} now={now} />
+      <div className="console">
+        <StatusBar runId={run.runId} link={link} inferred={linkInferred(run, now, following)} now={now} lastAtShore={metrics.lastAtShore}
+          heldOnShip={held ? held.ship : metrics.heldOnShip} waitingAtCoast={held ? held.coast : metrics.waitingAtCoast}
+          mode={run.mode} onMode={LIVE ? undefined : setMode} />
+        {LIVE && <LiveBanner error={live.error} run={live.run} />}
+        <Playback start={start} end={end} now={now} playing={playing} speed={speed}
+          onSeek={v => { setFollowing(false); setNow(v) }} onPlay={setPlaying} onSpeed={setSpeed}
+          live={LIVE ? { following, onFollow: () => setFollowing(true),
+            hint: `live · Shore Monitor AE · run ${run.runId} since ${clock(start).slice(0, 5)} UTC · ${run.events.length.toLocaleString('en-US')} records` } : undefined} />
+        <KpiCards m={metrics} command={run.commands[run.commands.length - 1]} now={now} />
+      </div>
       <AiAlerts ai={ai} now={now} onOpen={() => setTab('ai')} />
       <Tabs active={tab} onChange={setTab} />
 
       {tab === 'overview' && (
-        <div className="tab-body overview">
-          <ContinuityTimeline events={run.events} links={run.links} start={start} end={end} now={now} height={540} mode={run.mode} />
-          <div className="side">
-            <NetworkPanel link={link} m={metrics} mode={run.mode} held={held ?? undefined} />
-            <EventLog feed={run.feed} now={now} />
+        <div className="tab-body overview-hud">
+          <TopologyMap link={link} inferred={linkInferred(run, now, following)} m={metrics} held={held ?? undefined} />
+          <div className="ov-row">
+            <ContinuityTimeline events={run.events} links={run.links} start={start} end={end} now={now} height={470} mode={run.mode} />
+            <div className="side">
+              <DeliveryDonut events={run.events} now={now} heldOnShip={held ? held.ship ?? 0 : metrics.heldOnShip}
+                waitingAtCoast={held ? held.coast ?? 0 : metrics.waitingAtCoast} lost={metrics.lost} height={230} />
+              <EventLog feed={run.feed} now={now} />
+            </div>
           </div>
         </div>
       )}
 
       {tab === 'sensors' && (
         <div className="tab-body zones">
+          <ShipMotion events={run.events} now={now} height={240} />
           {NODES.map(nd => (
             <ZoneChart key={nd.device} title={nd.title} subtitle={nd.subtitle} series={nd.series}
               records={atShore.filter(e => e.deviceId === nd.device)} links={run.links}
@@ -177,7 +187,7 @@ export default function App() {
         ? <MeasurementTab anchor={run.mode === 'anchor' ? run : runs.anchor} baseline={run.mode === 'baseline' ? run : runs.baseline}
             note={`${run.mode === 'anchor' ? 'ANCHOR' : 'Baseline'}: live run ${run.runId} · ${otherMode === 'anchor' ? 'ANCHOR' : 'Baseline'}: dummy data`} />
         : <MeasurementTab anchor={runs.anchor} baseline={runs.baseline} />)}
-      {tab === 'ai' && <AiTab ai={ai} now={now} live={LIVE} />}
+      {tab === 'ai' && <AiTab ai={ai} fleet={fleet} now={now} live={LIVE} />}
       {tab === 'security' && <SecurityTab />}
 
       {tab === 'sensors' && (

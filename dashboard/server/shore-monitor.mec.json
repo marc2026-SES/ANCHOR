@@ -1,5 +1,5 @@
 {
-  "_comment": "MEC sandbox (TR-0077 Option D): ship, edge and shore CSEs on the MEC host, reached over Tailscale (plain HTTP NodePorts relayed on 100.96.155.4; Tailscale encrypts the path). Run on a laptop logged in to the team Tailscale. Read-only as CAnchorDashboard; no subscription (scan only), no core tokens. Separate db and port from the Pi monitor.",
+  "_comment": "MEC sandbox over Tailscale. CSEs on HTTP NodePorts 30080/81/82. Core link state from the read-only /status relay on the map server (30793/core/<role>/status, GET only, no token; the operator tokens stay on the MEC server). The shore core is left out by design. Run on the laptop; view at http://127.0.0.1:8797/?live",
   "shore": {
     "url": "http://100.96.155.4:30081",
     "root": "cse-in",
@@ -30,5 +30,15 @@
     "id": "mec-sandbox",
     "mode": "anchor",
     "history_minutes": 60
+  },
+  "cores": {
+    "ship": {
+      "url": "http://100.96.155.4:30793/core/ship",
+      "timeout": 5
+    },
+    "edge": {
+      "url": "http://100.96.155.4:30793/core/edge",
+      "timeout": 5
+    }
   }
 }

@@ -1,5 +1,89 @@
 {
- "ranAt": null,
- "cses": {},
- "results": []
+ "ranAt": "2026-11-18T07:40:05+00:00",
+ "cses": {
+  "ship": "cse-ship",
+  "shore": "cse-in"
+ },
+ "results": [
+  {
+   "id": "T1",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T2",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T3",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T4",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T5",
+   "expected": 4103,
+   "got": null,
+   "status": "skipped",
+   "note": "no record to aim at (journal empty or not readable)",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T6",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:04+00:00"
+  },
+  {
+   "id": "T7",
+   "expected": 401,
+   "got": 401,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:05+00:00"
+  },
+  {
+   "id": "T8",
+   "expected": 2000,
+   "got": 2000,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:05+00:00"
+  },
+  {
+   "id": "T9",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:05+00:00"
+  },
+  {
+   "id": "T10",
+   "expected": 4103,
+   "got": 4103,
+   "status": "pass",
+   "note": "",
+   "at": "2026-11-18T07:40:05+00:00"
+  }
+ ]
 }

@@ -144,6 +144,7 @@ AI 결과는 `anchorAI/` 아래(`aiStatus`, `anomaly`, `summary`, `prognosis`, `
 - 같은 결과가 선박과 복제본 양쪽에서 읽혀도 `eventId`로 한 번만 보여줍니다.
 - 한계: 링크 A가 끊긴 동안에는 새 AI 결과가 육상에 안 옵니다. 끊긴 동안 생긴 이상·예측은 선박에 남아 있다가 다시 연결되면 보입니다(시험에서 확인). 복제가 ANCHOR 저널을 타지 않으면 우선 전송·수신 확인은 없습니다.
 - `linkForecast`의 `lat`·`lon`은 저장 전에 지웁니다(`redact_position`).
+- 연안 선단 AI: `cse-edge/fleetAI/`의 `fleetStatus`(30초)·`conflicts`(충돌 경고)도 같은 방식으로 읽어 AI 탭의 "Fleet · coastal AI" 카드에 보여줍니다. `edge.url`이 있어야 하고, 끄려면 `"fleet": {"enabled": false}`. 필드 이름은 fleet-ai가 쓰는 그대로 보여주고, 위치 필드는 지웁니다.
 - 끄기: 설정에 `"ai": {"enabled": false}`.
 
 ### 실데이터일 때 화면에서 달라지는 점

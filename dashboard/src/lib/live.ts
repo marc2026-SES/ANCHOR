@@ -3,7 +3,7 @@
 // into the same Run shape the mock produces, so every chart and metric runs unchanged.
 
 import { useEffect, useRef, useState } from 'react'
-import type { AiInfo, Command, Delivered, FeedItem, LinkChange, LinkId, LiveInfo, Run } from '../types'
+import type { AiInfo, Command, Delivered, FeedItem, FleetInfo, LinkChange, LinkId, LiveInfo, Run } from '../types'
 
 interface ApiCommand {
   commandId: string; target: string; intervalMs: number; durationMs: number
@@ -11,7 +11,7 @@ interface ApiCommand {
 }
 interface ApiRun {
   runId: string; mode: 'anchor' | 'baseline'; start: number; end: number | null; now: number; rev: number; after: number
-  events: Delivered[]; commands: ApiCommand[]; links: LinkChange[]; live: LiveInfo | null; ai?: AiInfo | null
+  events: Delivered[]; commands: ApiCommand[]; links: LinkChange[]; live: LiveInfo | null; ai?: AiInfo | null; fleet?: FleetInfo | null
 }
 
 const POLL_MS = 2_000
@@ -113,7 +113,7 @@ export function useLiveRun(enabled: boolean): LiveState {
         const commands = api.commands.map(x => toCommand(x, events))
         const run: Run = {
           runId: api.runId, mode: api.mode, start: api.start, end: api.end ?? api.now,
-          events, links, commands, feed: buildFeed(events, links, commands), live: api.live, ai: api.ai ?? null,
+          events, links, commands, feed: buildFeed(events, links, commands), live: api.live, ai: api.ai ?? null, fleet: api.fleet ?? null,
         }
         if (!stop) setState({ run, skew: api.now - Date.now(), error: null })
       } catch (err) {
