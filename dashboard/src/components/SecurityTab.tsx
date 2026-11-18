@@ -22,7 +22,7 @@ function ranLine(run: DenyRun) {
   return `${passed}/${run.results.length} as expected · ${at} UTC · ${Object.values(run.cses).join(' · ')}`
 }
 
-const OPS: Record<string, string> = { C: 'create', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
+const OPS: Record<string, string> = { C: 'create', 'C(SUB)': 'create subscription only: acod/chty=[23]', 'C(CIN)': 'create content instance only: acod/chty=[4]', R: 'retrieve', U: 'update', D: 'delete', N: 'notify', Di: 'discover', all: 'all operations (63)' }
 
 export function SecurityTab() {
   return (
@@ -51,12 +51,12 @@ export function SecurityTab() {
             </tbody>
           </table>
         </div>
-        <p className="note">C create · R retrieve · U update · D delete · N notify · Di discover. Anything not listed is denied (4103).</p>
+        <p className="note">C create · C(SUB) create subscription only · C(CIN) create content instance only · R retrieve · U update · D delete · N notify · Di discover. Each conditional grant permits only its named child type; anything not listed is denied (4103).</p>
       </section>
 
       <div className="row two">
         <section className="panel">
-          <header className="panel-head"><h3>Denied-request tests</h3><span>T1–T7, T9–T10 must be refused · T8 must pass · {ranLine(RUN)}</span></header>
+          <header className="panel-head"><h3>Access-control tests</h3><span>T8 · T12 · T16 must pass, the rest must be refused · {ranLine(RUN)}</span></header>
           <table className="grid">
             <thead><tr><th>#</th><th>Test</th><th>Request</th><th>Expected</th><th>Result</th></tr></thead>
             <tbody>
