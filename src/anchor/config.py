@@ -51,6 +51,7 @@ class Settings:
     critical_burst: int = 4
     direct_shore: bool = False
     dashboard_edge_read: bool = False
+    dds_ipe_enabled: bool = False
     tilt: dict = field(default_factory=lambda: {"trigger": 25, "recover": 15, "holdSeconds": 2,
                                                 "recoverSeconds": 2, "maxGapSeconds": 4})
 
@@ -61,6 +62,8 @@ class Settings:
             raise ValueError("vessel_id must be nonempty and contain no colon")
         if type(self.dashboard_edge_read) is not bool:
             raise ValueError('dashboard_edge_read must be a boolean')
+        if type(self.dds_ipe_enabled) is not bool or (self.dds_ipe_enabled and self.role != 'edge'):
+            raise ValueError('dds_ipe_enabled is a boolean for the edge role only')
         if not 0.2 <= self.scan_seconds <= 60 or min(self.max_records, self.max_bytes, self.batch_size, self.critical_burst) <= 0:
             raise ValueError("Invalid scan interval or storage/batch limit")
         if self.batch_size <= self.critical_burst:
