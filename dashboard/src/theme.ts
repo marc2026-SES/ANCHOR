@@ -14,9 +14,17 @@ export const C = {
 }
 
 export const LINK: Record<LinkId, { name: string; short: string; color: string; band: string }> = {
-  A: { name: 'Link A · ship ↔ coast', short: 'A ship↔coast', color: '#bd8c37', band: 'rgba(189,140,55,0.14)' },
-  B: { name: 'Link B · coast ↔ shore', short: 'B coast↔shore', color: '#d9604f', band: 'rgba(217,96,79,0.12)' },
+  A: { name: 'Link A (ship ↔ coast)', short: 'A ship↔coast', color: '#bd8c37', band: 'rgba(189,140,55,0.07)' },
+  B: { name: 'Link B (coast ↔ shore)', short: 'B coast↔shore', color: '#d9604f', band: 'rgba(217,96,79,0.07)' },
 }
+
+/** dark HUD tooltip for every ECharts options object */
+export const TOOLTIP = {
+  backgroundColor: 'rgba(8, 24, 38, 0.96)',
+  borderColor: 'rgba(95, 195, 239, 0.35)',
+  textStyle: { color: '#dfeaf2', fontSize: 12 },
+  extraCssText: 'box-shadow: 0 0 14px rgba(95,195,239,0.15); border-radius: 0;',
+} as const
 
 export const FONT = "'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif"
 

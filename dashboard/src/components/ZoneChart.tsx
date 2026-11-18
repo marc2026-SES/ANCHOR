@@ -3,7 +3,7 @@ import { EChart } from './EChart'
 import { bands } from './bands'
 import { isHeld } from '../lib/metrics'
 import type { Delivered, LinkChange, Sensor } from '../types'
-import { C, FONT, clock } from '../theme'
+import { C, FONT, clock, TOOLTIP } from '../theme'
 
 export interface SeriesSpec {
   sensor: Sensor
@@ -68,7 +68,7 @@ export function ZoneChart(props: {
       textStyle: { fontFamily: FONT },
       animation: false,
       grid: { left: 44, right: twoAxes && !eventAxis ? 44 : 14, top: 34, bottom: 24 },
-      tooltip: { trigger: 'axis', valueFormatter: (v: number) => (v == null ? '—' : String(v)) },
+      tooltip: { ...TOOLTIP, trigger: 'axis', valueFormatter: (v: number) => (v == null ? '—' : String(v)) },
       legend: { top: 4, right: 8, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 11, color: C.muted },
         data: series.map(s => s.label) },
       xAxis: { type: 'time', min: start, max: end, axisLabel: { fontSize: 10, color: C.muted, formatter: (v: number) => clock(v).slice(0, 5) },

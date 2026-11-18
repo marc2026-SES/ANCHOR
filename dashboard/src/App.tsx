@@ -65,13 +65,13 @@ function liveHeld(run: Run, m: Metrics, following: boolean): { ship: number | nu
 }
 
 const NODES: { device: string; title: string; subtitle: string; series: SeriesSpec[] }[] = [
-  { device: 'bridge', title: 'BRIDGE', subtitle: 'MPU6050 roll · pitch (°) · 1 Hz',
+  { device: 'bridge', title: 'BRIDGE', subtitle: 'MPU6050 roll, pitch (°), 1 Hz',
     series: [{ sensor: 'attitude', field: 'roll', label: 'Roll', every: 1_000 },
       { sensor: 'attitude', field: 'pitch', label: 'Pitch', every: 1_000, color: LINK.A.color }] },
-  { device: 'engine', title: 'ENGINE', subtitle: 'ADXL345 vibration RMS (g) · 1 Hz · MQ-2 voltage (V, not ppm) · 0.5 Hz',
+  { device: 'engine', title: 'ENGINE', subtitle: 'ADXL345 vibration RMS (g), 1 Hz, MQ-2 voltage (V, not ppm), 0.5 Hz',
     series: [{ sensor: 'vibration', field: 'vib_rms_g', label: 'Vibration', every: 1_000 },
       { sensor: 'gas', field: 'mq2_v', label: 'MQ-2', every: 2_000, axis: 1, color: LINK.A.color }] },
-  { device: 'cargo', title: 'CARGO', subtitle: 'DHT11 temperature (°C) · 5 s · MC-38 hatch changes',
+  { device: 'cargo', title: 'CARGO', subtitle: 'DHT11 temperature (°C), 5 s, MC-38 hatch changes',
     series: [{ sensor: 'climate', field: 'temp_c', label: 'Temperature', every: 5_000 },
       { sensor: 'hatch', field: 'state', label: 'Hatch', every: 30_000, axis: 1, events: true }] },
 ]
@@ -151,7 +151,7 @@ export default function App() {
         <Playback start={start} end={end} now={now} playing={playing} speed={speed}
           onSeek={v => { setFollowing(false); setNow(v) }} onPlay={setPlaying} onSpeed={setSpeed}
           live={LIVE ? { following, onFollow: () => setFollowing(true),
-            hint: `live · Shore Monitor AE · run ${run.runId} since ${clock(start).slice(0, 5)} UTC · ${run.events.length.toLocaleString('en-US')} records` } : undefined} />
+            hint: `live, Shore Monitor AE, run ${run.runId} since ${clock(start).slice(0, 5)} UTC, ${run.events.length.toLocaleString('en-US')} records` } : undefined} />
         <KpiCards m={metrics} command={run.commands[run.commands.length - 1]} now={now} />
       </div>
       <AiAlerts ai={ai} now={now} onOpen={() => setTab('ai')} />
@@ -173,7 +173,7 @@ export default function App() {
 
       {tab === 'sensors' && (
         <div className="tab-body zones">
-          <ShipMotion events={run.events} now={now} height={240} />
+          <ShipMotion events={run.events} now={now} height={178} />
           {NODES.map(nd => (
             <ZoneChart key={nd.device} title={nd.title} subtitle={nd.subtitle} series={nd.series}
               records={atShore.filter(e => e.deviceId === nd.device)} links={run.links}
@@ -185,7 +185,7 @@ export default function App() {
 
       {tab === 'measurement' && (LIVE
         ? <MeasurementTab anchor={run.mode === 'anchor' ? run : runs.anchor} baseline={run.mode === 'baseline' ? run : runs.baseline}
-            note={`${run.mode === 'anchor' ? 'ANCHOR' : 'Baseline'}: live run ${run.runId} · ${otherMode === 'anchor' ? 'ANCHOR' : 'Baseline'}: dummy data`} />
+            note={`${run.mode === 'anchor' ? 'ANCHOR' : 'Baseline'}: live run ${run.runId}, ${otherMode === 'anchor' ? 'ANCHOR' : 'Baseline'}: dummy data`} />
         : <MeasurementTab anchor={runs.anchor} baseline={runs.baseline} />)}
       {tab === 'ai' && <AiTab ai={ai} fleet={fleet} now={now} live={LIVE} />}
       {tab === 'security' && <SecurityTab />}

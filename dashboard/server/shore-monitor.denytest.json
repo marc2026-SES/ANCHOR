@@ -1,0 +1,22 @@
+{
+  "_comment": "Deny tests from the laptop over Tailscale. shore = the real Pi4 Plan-A CSE (HTTPS 8443, team CA). ship = the MEC sandbox's ship CSE (virtual twin; the real ship CSE has no ANCHOR ACPs yet). cores.ship = MEC ship core for T7 (401 without a token is the expected pass). Results: src/security/deny-results.json.",
+  "shore": {
+    "url": "https://100.98.242.10:8443",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "timeout": 6
+  },
+  "ship": {
+    "url": "http://100.96.155.4:30082",
+    "root": "cse-ship",
+    "csi": "/id-ship",
+    "timeout": 6
+  },
+  "cores": {
+    "ship": { "url": "http://100.96.155.4:30792", "timeout": 6 }
+  },
+  "notify": { "url": "" },
+  "api": { "bind": "127.0.0.1", "port": 8799 },
+  "tls": { "ca": "secrets/pi-ca.crt" },
+  "db": "data/denytest.db"
+}
