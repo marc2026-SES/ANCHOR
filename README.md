@@ -121,7 +121,7 @@ scripts/export-source.sh shore "$PWD/.runtime-packages/anchor-shore.tar.gz"
 
 8080은 그대로 쓰되 HTTPS로 접속한다. 인증서가 없거나 신뢰 검증에 실패하면 연결을 중지한다. HTTP/MQTT로 자동 우회하지 않는다. HTTP 리다이렉트도 따라가지 않는다. NTP·mDNS는 시각 동기화·주소 검색용으로 남으며, ArduinoOTA는 기본 비활성화하고 USB로 펌웨어를 올린다.
 
-MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. ACP는 자원별로 분리했고 센서 화면은 `CAnchorDashboard`로 읽는다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator 연결과 HTTPS 호출자 신원 연결은 아직 남아 있다. TLS만으로 Originator 사칭이 차단되지는 않는다. DDS는 아직 추가하지 않았다.
+MQTTS의 클라이언트 인증과 **oneM2M ACP 권한 정책은 별개**다. ACP는 자원별로 분리했고 센서 화면은 `CAnchorDashboard`로 읽는다. 인증서 CN ↔ MQTT 토픽 ↔ oneM2M Originator 연결과 HTTPS 호출자 신원 연결은 아직 남아 있다. TLS만으로 Originator 사칭이 차단되지는 않는다. DDS 구현은 `feature/native-dds-ipe` 브랜치에 있으며 `main`에는 포함하지 않았다.
 
 ## ACP 최소 권한과 대시보드 연결
 
@@ -138,7 +138,8 @@ ACP 이름은 `acp-<자원 경로에서 /를 -로 바꾼 값>`이다. 예: `acp-
 | BRIDGE·ENGINE → 자기 `command` | R(2) + SUB만 C. 이 장치 명령 CNT에 CIN을 기록하는 주체는 선박 core |
 | 선박 Dashboard → 센서 | R(2), `bridge/position` 제외 |
 | 선박 core → `anchor/reportingGroup` | `acp-anchor-reportingGroup`으로 전체 권한; 다른 앱은 그룹 제어 불가 |
-| AI 에이전트 | 저널 권한 미부여. 이름·위치 제거 인터페이스 합의 전까지 허용하지 않음 |
+| `CAnchorAgent` → 선박 센서 6개 | R·Di(34). `bridge/attitude`, `bridge/position`, `engine/vibration`, `engine/gas`, `cargo/climate`, `cargo/hatch` |
+| `CAnchorAgent` → 선박 부모 AE | `bridge`·`engine`·`cargo` 및 자기 `agent` AE에 R·Di(34). 탐색용이며 다른 자식의 ACP를 우회하지 않음 |
 
 센서·명령 결과·SDT FCNT에도 자원마다 별도 ACP를 둔다. 초안의 장치 `command`에 대한 일반 C·R(3)은 장치가 명령 CIN을 직접 만들 수 있어 **R + SUB 전용 C**로 좁혔다. `acod/chty`는 생성할 자식 종류를 제한하는 조건이다. [oneM2M TS-0001 9.6.2.4](https://www.onem2m.org/images/files/deliverables/Release2A/TS-0001-Functional_Architecture-v_2_18_1.pdf)
 
@@ -146,7 +147,11 @@ ACP 이름은 `acp-<자원 경로에서 /를 -로 바꾼 값>`이다. 예: `acp-
 
 기존 CSE는 DB·설정을 백업하고 세 역할에서 `bootstrap`을 다시 실행한다. 새 ACP를 생성한 뒤 AE·CNT·FCNT·GRP의 `acpi`를 갱신하며, 기존 CIN과 관측 온도는 유지한다. 옛 이름 ACP는 자동 삭제하지 않는다. 사용 중인 참조가 없는지 확인한 뒤 정리한다. 육상 하드웨어 화면은 Dashboard 소유의 `sub-shore-dash-reader`를 사용하며, 기존 core 소유 `sub-shore-dash`도 자동 삭제하지 않는다.
 
-육상 `anchor/events`에는 위치 이벤트도 있으므로 Dashboard의 저널 조회 권한에는 위치 조회도 포함된다. 이 신원이나 운영자 토큰을 AI에 공유하지 않는다. 위치 제거를 저널 수준으로 분리할지 AI 전용 API로 제공할지는 별도 합의가 필요하다.
+AI 에이전트는 실행 위치와 관계없이 **선박 CSE**에 `X-M2M-Origin: CAnchorAgent`로 요청한다. 요청대로 GPS `bridge/position`을 포함한 6개 센서를 허용했다. 센서 CNT와 하위 CIN·`la` 조회, 센서/CIN 검색만 가능하며 CIN·SUB 생성, 수정·삭제, 명령·결과·SDT `cargo/temperature`·anchor 저널 접근은 허용하지 않는다. 선박 Dashboard의 GPS 접근 제한은 유지한다. 추가 센서는 자동으로 AI에 공개하지 않는다.
+
+기존 선박 CSE에 적용하려면 갱신한 코드로 `./deploy/ship/run.sh bootstrap`을 실행한다. `agent` AE를 등록하고 `acp-agent`, 부모 AE 및 센서별 ACP를 갱신한다. 기존 센서 기록은 유지한다. 예를 들어 `GET /~/id-ship/cse-ship/bridge/position/la`로 최신 GPS CIN을 읽고, `GET /~/id-ship/cse-ship/bridge?fu=1&ty=3&drt=1`로 허용된 센서 CNT를 찾는다. 기본 주소는 `https://ship.local:8080`이며 실제 배포 주소와 인증서 SAN에 맞춰야 한다. CA PEM으로 서버 인증서를 검증한다. core API용 `api-token`·`status-token`과 CSE ACP는 별개다.
+
+육상 `anchor/events`에는 위치 이벤트도 있으므로 Dashboard의 저널 조회 권한에는 위치 조회도 포함된다. AI에는 별도 `CAnchorAgent` 신원을 사용하고 Dashboard 신원이나 운영자 토큰을 공유하지 않는다. 이번 권한은 선박 원본 센서 6개에만 적용하며 육상·연안 저널 권한은 추가하지 않는다.
 
 ## Shore Monitor 주소와 읽기 전용 토큰
 
@@ -356,7 +361,7 @@ scripts/check-firmware.sh
 
 일반 테스트는 실제 센서 JSON 계약, 단절·재시작·중복·충돌·용량 제한·명령 결과 경계를 검사한다. 시나리오 단위 테스트는 CSE API 대역을 사용한다. MCU 시간 정책은 호스트 C++ 컴파일로 검사한다. 별도 ACME 통합 테스트는 임시 DB와 포트로 CSE 세 개를 실행한다. 결과 CIN fixture를 사용하는 부분은 실제 ESP32 시험과 구분했다.
 
-이번에는 Python 문법·JSON 설정과 테스트 135개 수집까지만 확인했다. **수집은 실행·통과를 뜻하지 않는다.** 사용자의 요청에 따라 ACP·토큰·재시도를 포함한 전체 기능 검증은 장비를 모두 켠 뒤 진행한다.
+현재 `main`의 테스트는 143개다. **수집은 실행·통과를 뜻하지 않는다.** 2026-11-18 AI 권한 변경 후 `main`에서 비통합 테스트 **111 passed**, 로컬 ACME 3개를 띄운 HTTPS 권한 검사(`-k 'agent or provision_is_repeatable'`) **3 passed / 18 deselected**를 확인했다. 6개 센서 CNT·CIN·최신값 조회, 부모/기록 검색, 재bootstrap 후 데이터 유지, 쓰기·구독·수정·삭제·명령 접근 거부를 검사했다. 대시보드 TypeScript 검사와 빌드도 통과했다. 나머지 통합 시험과 실제 Pi·ESP32 시험은 이번에 실행하지 않았다.
 
 이전 TLS 단계의 66 passed / 18 skipped는 이번 수정 이후 결과가 아니다. 당시 메모리 TLS 핸드셰이크·CA/SAN·클라이언트 인증서·역할별 묶음 분리를 검사했다. 실제 소켓 시험은 도구 환경의 포트 개설 제한과 Mosquitto 공유 라이브러리 누락으로 실행하지 못했다. 3-CSE HTTPS와 MQTTS 상·하향 시험 코드는 준비되어 있다. ESP32 전체 빌드·플래시와 실물 통신은 아직 미검증이다.
 

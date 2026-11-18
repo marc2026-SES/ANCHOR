@@ -4,6 +4,10 @@ from .config import DEVICES, ORIGINS, SENSORS
 
 JOURNALS = ('events', 'receipts', 'commands', 'dispatches', 'quarantine', 'ruleState', 'audit')
 POLLERS = {'edge': ('shipCommands', 'CAnchorShipPoll'), 'shore': ('edgeCommands', 'CAnchorEdgePoll')}
+AGENT_ORIGIN = 'CAnchorAgent'
+# Explicitly approved sensor paths, including GPS. New sensors need a separate grant.
+AGENT_SENSORS = frozenset(('bridge/attitude', 'bridge/position', 'engine/vibration',
+                           'engine/gas', 'cargo/climate', 'cargo/hatch'))
 
 
 def ae(admin, name, origin, reachable=False):
@@ -100,16 +104,23 @@ def bootstrap(settings, client):
         admin.as_origin(origin).ensure(admin.root + '/' + name, 15,
                                       {'m2m:pch': {'rn': 'pch', 'rqag': True}})
     if role == 'ship':
+        ae(admin, 'agent', AGENT_ORIGIN)
+        agent_policy = resource_policy(admin, 'agent', [([AGENT_ORIGIN], 34)])
+        assign_policy(admin, admin.root + '/agent', 'm2m:ae', agent_policy, AGENT_ORIGIN)
         members = []
         for device, origin in DEVICES.items():
             ae(admin, device, origin)
             sensor_grants = [([core], 63), ([origin], 7), (['CAnchorDashboard'], 2)]
-            p = resource_policy(admin, device, sensor_grants)
+            # Parent discovery does not grant access to independently protected children.
+            parent_grants = sensor_grants + [([AGENT_ORIGIN], 34)]
+            p = resource_policy(admin, device, parent_grants)
             assign_policy(admin, admin.root + '/' + device, 'm2m:ae', p, origin)
             admin.update(admin.root + '/' + device, {'m2m:ae': {'lbl': ['anchor:hardware', 'device:' + device]}})
             for sensor in SENSORS[device]:
                 # Location is kept separate from the public sensor dashboard identity.
                 grants = sensor_grants if sensor != 'position' else [([core], 63), ([origin], 7)]
+                if device + '/' + sensor in AGENT_SENSORS:
+                    grants = grants + [([AGENT_ORIGIN], 34)]
                 sensor_policy = resource_policy(admin, device + '/' + sensor, grants)
                 container(admin, admin.root + '/' + device, sensor, sensor_policy,
                           ['anchor:sensor', 'device:' + device, 'sensor:' + sensor], owner=origin)
