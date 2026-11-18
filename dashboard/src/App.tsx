@@ -5,6 +5,8 @@ import { AUTH_NEEDED, setApiToken, useLiveRun } from './lib/live'
 import { StatusBar, Playback } from './components/StatusBar'
 import { KpiCards } from './components/KpiCards'
 import { Tabs, type TabId } from './components/Tabs'
+import { AiAlerts, AiTab } from './components/AiTab'
+import { demoAi } from './mock/ai'
 import { ContinuityTimeline } from './components/ContinuityTimeline'
 import { NetworkPanel } from './components/NetworkPanel'
 import { ZoneChart, type Marker, type SeriesSpec } from './components/ZoneChart'
@@ -132,6 +134,7 @@ export default function App() {
     : computed
   const atShore = useMemo(() => run.events.filter(e => e.shoreAt !== null && e.shoreAt <= now), [run, now])
   const link = linkStates(run, now, following)
+  const ai = useMemo(() => (LIVE ? run.ai : demoAi(run)), [run])
   const otherMode = run.mode === 'anchor' ? 'baseline' : 'anchor'
 
   return (
@@ -146,6 +149,7 @@ export default function App() {
         live={LIVE ? { following, onFollow: () => setFollowing(true),
           hint: `live · Shore Monitor AE · run ${run.runId} since ${clock(start).slice(0, 5)} UTC · ${run.events.length.toLocaleString('en-US')} records` } : undefined} />
       <KpiCards m={metrics} command={run.commands[run.commands.length - 1]} now={now} />
+      <AiAlerts ai={ai} now={now} onOpen={() => setTab('ai')} />
       <Tabs active={tab} onChange={setTab} />
 
       {tab === 'overview' && (
@@ -173,6 +177,7 @@ export default function App() {
         ? <MeasurementTab anchor={run.mode === 'anchor' ? run : runs.anchor} baseline={run.mode === 'baseline' ? run : runs.baseline}
             note={`${run.mode === 'anchor' ? 'ANCHOR' : 'Baseline'}: live run ${run.runId} · ${otherMode === 'anchor' ? 'ANCHOR' : 'Baseline'}: dummy data`} />
         : <MeasurementTab anchor={runs.anchor} baseline={runs.baseline} />)}
+      {tab === 'ai' && <AiTab ai={ai} now={now} live={LIVE} />}
       {tab === 'security' && <SecurityTab />}
 
       {tab === 'sensors' && (

@@ -28,6 +28,9 @@ export const ACPS: AcpRow[] = [
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge', ops: 'C R U' }] },
   { name: 'acp-bridge-command · acp-engine-command', on: '<node>/command (reportingGroup members)', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine (own node)', ops: 'C R' }] },
+  { name: '★ acp-anchorAI (proposed)', on: 'anchorAI AE · aiStatus, anomaly, summary, prognosis, linkForecast', cse: 'ship · shore (copy)',
+    grants: [{ who: '★ CAnchorAgent (the AI writer; not CAdmin)', ops: 'C R' },
+      { who: '★ CAnchorDashboard', ops: 'R Di' }] },
 ]
 
 /** Denied-request tests. server/deny_tests.py runs them against the CSEs and writes deny-results.json. */
@@ -52,6 +55,7 @@ export const TRANSPORT: { hop: string; how: string; open?: boolean }[] = [
   { hop: 'CSE ↔ CSE, core → CSE (HTTP)', how: 'trusted LAN / VPN in the demo; HTTPS for untrusted networks (the core refuses to switch off CA verification)' },
   { hop: 'ESP32 → ship CSE (MQTT)', how: 'Mosquitto allow_anonymous on the boat LAN (dev) · MQTT accounts and TLS still to add', open: true },
   { hop: 'Ship position (privacy)', how: 'bridge/position has its own ACP without the dashboard identity, but position events are copied into anchor/events, which the dashboard reads · the Shore Monitor strips lat/lon before storing · the control API still shows the latest value to token holders', open: true },
+  { hop: 'AI results (anchorAI)', how: 'read by the Shore Monitor as CAnchorDashboard over https, never as CAdmin: the shore CSE copy first, else the ship CSE · while link A is down no new results reach the shore (shown as "Ship not reachable", not an AI failure) · linkForecast lat/lon stripped before storing · the copy\'s route and writer identity still to agree', open: true },
   { hop: 'Shore Monitor API (port 8795)', how: '127.0.0.1 only unless a token file is set · the dashboard /api proxy forwards GET only, so runs are started and closed on the monitor machine' },
   { hop: 'Core tokens on the monitor', how: 'ship and edge only, read from files, for /status · the shore core token (it can issue commands) is refused · the same tokens can also acknowledge incidents: a read-only status token is still to add', open: true },
 ]
