@@ -86,9 +86,14 @@ export function computeMetrics(events: Delivered[], links: LinkChange[], now: nu
   const delay = (e: Delivered) => e.shoreAt! - e.generatedAt
 
   // drains: after a link came back, how long until what waited behind it had crossed
+  // Only an up that follows a down is a restoration. The first report of a link (mock run start, or the
+  // moment the live monitor first reads a core) is the initial state, even when it lands after the first event.
   const drains: Drain[] = []
-  for (const c of links) {
-    if (!c.up || c.t <= events[0]?.generatedAt || c.t > now) continue
+  const wasUp = new Map<LinkId, boolean>()
+  for (const c of [...links].sort((a, b) => a.t - b.t)) {
+    const before = wasUp.get(c.link)
+    wasUp.set(c.link, c.up)
+    if (!c.up || before !== false || c.t > now) continue
     const crossed = (e: Delivered) => (c.link === 'A' ? e.coastAt : e.shoreAt)
     const waited = (e: Delivered) => {
       const ready = c.link === 'A' ? e.generatedAt : e.coastAt

@@ -1,0 +1,21 @@
+# ANCHOR Shore Monitor AE + dashboard on the shore Pi 4.
+# Install: sudo cp deploy/anchor-shore-monitor.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now anchor-shore-monitor
+[Unit]
+Description=ANCHOR Shore Monitor AE (dashboard)
+After=network-online.target time-sync.target anchor-cse@shore.service
+Wants=network-online.target
+ConditionPathExists=/opt/anchor-dashboard/server/shore-monitor.json
+
+[Service]
+# Same user as the team's shore CSE and core, so it can read /opt/anchor/.runtime-shore/tls/server.key
+User=pi
+WorkingDirectory=/opt/anchor-dashboard/server
+ExecStart=/usr/bin/python3 /opt/anchor-dashboard/server/shore_monitor.py --config /opt/anchor-dashboard/server/shore-monitor.json serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,57 @@
+{
+  "_comment": "Copy to shore-monitor.json (gitignored) and fill in the addresses. secrets/ (gitignored) holds the team ca.crt and the ship and edge cores' status-token files (GET /status only). Never add an operator api-token or the shore core.",
+  "origin": "CAnchorDashboard",
+  "shore": {
+    "url": "",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "edge": {
+    "url": "",
+    "root": "cse-edge",
+    "csi": "/id-edge",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "ship": {
+    "url": "",
+    "root": "cse-ship",
+    "csi": "/id-ship",
+    "rvi": "3",
+    "timeout": 3
+  },
+  "notify": {
+    "bind": "0.0.0.0",
+    "port": 8796,
+    "url": "",
+    "sub_name": "shore-monitor"
+  },
+  "api": {
+    "bind": "127.0.0.1",
+    "port": 8795
+  },
+  "cores": {
+    "ship": {
+      "url": "",
+      "token_file": "secrets/ship-status-token"
+    },
+    "edge": {
+      "url": "",
+      "token_file": "secrets/edge-status-token"
+    }
+  },
+  "tls": {
+    "ca": "secrets/ca.crt",
+    "cert": "",
+    "key": ""
+  },
+  "scan_seconds": 2,
+  "db": "data/shore-monitor.db",
+  "run": {
+    "id": "live",
+    "mode": "anchor",
+    "history_minutes": 60
+  }
+}

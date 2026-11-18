@@ -3,11 +3,14 @@ import type { Metrics } from '../lib/metrics'
 import { commandStep, fmtMs, n } from '../lib/metrics'
 import { clock } from '../theme'
 
-function Card({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: 'good' | 'bad' }) {
+function Card({ label, value, sub, tone, bar }: { label: string; value: string; sub: string; tone?: 'good' | 'bad'; bar?: number }) {
   return (
     <div className={`kpi ${tone ?? ''}`}>
       <div className="kpi-label">{label}</div>
       <div className="kpi-value">{value}</div>
+      {bar !== undefined && (
+        <div className="kpi-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, Math.max(0, bar))}%` }} /></div>
+      )}
       <div className="kpi-sub" title={sub}>{sub}</div>
     </div>
   )
@@ -19,7 +22,7 @@ export function KpiCards({ m, command, now }: { m: Metrics; command?: Command; n
   const step = command ? commandStep(command, now) : undefined
   return (
     <div className="kpis">
-      <Card label="Shore confirmed" value={`${pct.toFixed(pct > 99 && pct < 100 ? 1 : 0)}%`}
+      <Card label="Shore confirmed" value={`${pct.toFixed(pct > 99 && pct < 100 ? 1 : 0)}%`} bar={pct}
         sub={`${n(m.shoreConfirmed)} of ${n(m.generated)} · coast ${n(m.coastCustody)}`} />
       <Card label="Records lost" value={n(m.lost)}
         sub={`seq gaps now ${n(m.seqGaps)} · ${m.reboots ? `${m.reboots} reboot` : 'no reboot'}`}

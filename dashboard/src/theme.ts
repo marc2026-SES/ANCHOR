@@ -1,21 +1,21 @@
 import type { LinkId } from './types'
 
 export const C = {
-  ink: '#1d1d1f',
-  muted: '#6b6b70',
-  line: '#e3e3e6',
-  panel: '#ffffff',
-  page: '#f4f5f7',
-  blue: '#005581',      // deck primary
-  red: '#c0262d',       // deck accent
-  recovered: '#7a5fa8', // data that arrived late (kept on the ship or at the coast, then forwarded)
-  up: '#1f8a5b',
-  down: '#b23a3a',
+  ink: '#dfeaf2',
+  muted: '#8fa6b5',
+  line: 'rgba(126, 180, 214, 0.16)',
+  panel: '#0e2233',
+  page: '#081722',
+  blue: '#3f9ad0',      // delivered live
+  red: '#d9604f',       // accent / link B
+  recovered: '#b273c8', // data that arrived late (kept on the ship or at the coast, then forwarded)
+  up: '#2fae76',
+  down: '#d9604f',
 }
 
 export const LINK: Record<LinkId, { name: string; short: string; color: string; band: string }> = {
-  A: { name: 'Link A · ship ↔ coast', short: 'A ship↔coast', color: '#c98612', band: 'rgba(201,134,18,0.12)' },
-  B: { name: 'Link B · coast ↔ shore', short: 'B coast↔shore', color: '#b23a3a', band: 'rgba(178,58,58,0.10)' },
+  A: { name: 'Link A · ship ↔ coast', short: 'A ship↔coast', color: '#bd8c37', band: 'rgba(189,140,55,0.14)' },
+  B: { name: 'Link B · coast ↔ shore', short: 'B coast↔shore', color: '#d9604f', band: 'rgba(217,96,79,0.12)' },
 }
 
 export const FONT = "'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', sans-serif"
