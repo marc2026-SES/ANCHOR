@@ -3,7 +3,7 @@ import { EChart } from './EChart'
 import { commandStep, computeMetrics, fmtMs, isHeld, n, type Drain, type Metrics } from '../lib/metrics'
 import { exportEvents, exportLinks } from '../lib/csv'
 import type { Run } from '../types'
-import { C, FONT, clock } from '../theme'
+import { C, FONT, clock, TOOLTIP } from '../theme'
 
 /** whiskers at p5 / p95 so a long tail shows without single outliers dominating */
 function fiveNum(xs: number[]): number[] {
@@ -20,11 +20,11 @@ function drains(m: Metrics, link: 'A' | 'B') {
   const ds = m.drains.filter(d => d.link === link && d.items > 0)
   if (!ds.length) return '—'
   const one = (d: Drain) => `${clock(d.up).slice(0, 5)} → ${fmtMs(d.drained)} (${n(d.items)})`
-  if (ds.length <= 3) return ds.map(one).join(' · ')
+  if (ds.length <= 3) return ds.map(one).join(', ')
   // a flapping link (live run) gives many restores: first two, then the count and the longest drain
   const done = ds.filter(d => d.drained !== null)
   const longest = done.length ? done.reduce((a, b) => (b.drained! > a.drained! ? b : a)) : null
-  return `${ds.slice(0, 2).map(one).join(' · ')} · +${ds.length - 2} more` + (longest ? ` · longest ${one(longest)}` : '')
+  return `${ds.slice(0, 2).map(one).join(', ')}, +${ds.length - 2} more` + (longest ? `, longest ${one(longest)}` : '')
 }
 
 function incidentDelay(run: Run) {
@@ -37,24 +37,24 @@ function commandResult(run: Run) {
   const c = run.commands[run.commands.length - 1]
   if (!c) return '—'
   const step = commandStep(c, run.end + 3_600_000)
-  return step === 'applied' ? `applied · ${fmtMs(c.appliedAt! - c.issuedAt)} after issue` : step
+  return step === 'applied' ? `applied ${fmtMs(c.appliedAt! - c.issuedAt)} after issue` : step
 }
 
-export function MeasurementTab({ anchor, baseline, note = 'demo run · full run · dummy data' }: { anchor: Run; baseline: Run; note?: string }) {
+export function MeasurementTab({ anchor, baseline, note = 'demo run, full run, dummy data' }: { anchor: Run; baseline: Run; note?: string }) {
   const runs = [baseline, anchor]
   const m = useMemo(() => runs.map(r => computeMetrics(r.events, r.links, r.end + 600_000, r.mode)), [anchor, baseline])
 
   const rows: { label: string; how: string; v: (x: Metrics, r: Run) => string }[] = [
     { label: 'Records generated', how: 'events in the ship journal', v: x => n(x.generated) },
     { label: 'Reached the shore', how: 'copies in cse-in/anchor/events', v: x => `${n(x.shoreConfirmed)} (${((x.shoreConfirmed / x.generated) * 100).toFixed(1)}%)` },
-    { label: 'Records lost', how: 'never forwarded · seq gaps per (device, bootId) at the end', v: x => `${n(x.lost)} · gaps ${n(x.seqGaps)}` },
+    { label: 'Records lost', how: 'never forwarded, seq gaps per (device, bootId) at the end', v: x => `${n(x.lost)}, gaps ${n(x.seqGaps)}` },
     { label: 'Live delay p50 / p95', how: 'shoreAt − generatedAt, records that never waited', v: x => `${fmtMs(x.live.p50)} / ${fmtMs(x.live.p95)}` },
     { label: 'Held data delay p50 / max', how: 'the same, records that waited on the ship or at the coast', v: x => `${fmtMs(x.held.p50)} / ${fmtMs(x.held.max)}` },
     { label: 'Tilt incident at shore', how: 'incident generated → shore copy (critical first)', v: (_, r) => incidentDelay(r) },
-    { label: 'Backlog drain · link A', how: 'link up → last waiting record stored at the coast', v: x => drains(x, 'A') },
-    { label: 'Backlog drain · link B', how: 'link up → last waiting record stored at the shore', v: x => drains(x, 'B') },
+    { label: 'Backlog drain (link A)', how: 'link up → last waiting record stored at the coast', v: x => drains(x, 'A') },
+    { label: 'Backlog drain (link B)', how: 'link up → last waiting record stored at the shore', v: x => drains(x, 'B') },
     { label: 'Shore command', how: 'issued at shore → ESP32 result "applied" within TTL', v: (_, r) => commandResult(r) },
-    { label: 'Reboots · duplicates', how: 'new bootId per node · same eventId twice', v: x => `${x.reboots} · ${x.duplicates}` },
+    { label: 'Reboots / duplicates', how: 'new bootId per node, same eventId twice', v: x => `${x.reboots} / ${x.duplicates}` },
   ]
 
   const option = useMemo(() => {
@@ -66,9 +66,9 @@ export function MeasurementTab({ anchor, baseline, note = 'demo run · full run 
       textStyle: { fontFamily: FONT },
       animation: false,
       grid: { left: 64, right: 16, top: 16, bottom: 40 },
-      tooltip: { trigger: 'item', formatter: (p: { name: string; value: number[] }) => {
+      tooltip: { ...TOOLTIP, trigger: 'item', formatter: (p: { name: string; value: number[] }) => {
         const v = Array.isArray(p.value) ? p.value.slice(-5) : []
-        return `${p.name.replace('\n', ' · ')}<br/>p5 ${fmtMs(v[0] ?? null)} · median ${fmtMs(v[2] ?? null)} · p95 ${fmtMs(v[4] ?? null)}`
+        return `${p.name.replace('\n', ' ')}<br/>p5 ${fmtMs(v[0] ?? null)}, median ${fmtMs(v[2] ?? null)}, p95 ${fmtMs(v[4] ?? null)}`
       } },
       xAxis: { type: 'category', data: cats, axisLabel: { fontSize: 11, color: C.muted, interval: 0 }, axisLine: { lineStyle: { color: C.line } } },
       yAxis: { type: 'log', min: 100, max: 1_000_000, axisLabel: { fontSize: 10, color: C.muted, formatter: (v: number) => fmtMs(v) },
@@ -100,7 +100,7 @@ export function MeasurementTab({ anchor, baseline, note = 'demo run · full run 
           <p className="note">Baseline = live forwarding without custody: whatever is generated while A or B is down is never delivered.</p>
         </section>
         <section className="panel">
-          <header className="panel-head"><h3>Delay to the shore</h3><span>generated → shore · p25–p75, whiskers p5–p95 · log</span></header>
+          <header className="panel-head"><h3>Delay to the shore</h3><span>generated → shore, p25–p75 box, p5–p95 whiskers, log scale</span></header>
           <EChart option={option} height={300} />
           <p className="note">Held records wait for the next contact of A and then B; critical records (incident, command results) go first in every batch.</p>
         </section>
