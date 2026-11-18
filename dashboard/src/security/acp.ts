@@ -39,9 +39,19 @@ export const ACPS: AcpRow[] = [
     grants: [{ who: 'CAnchorShip', ops: 'all' }, { who: 'CBridge · CEngine (own node)', ops: 'R C(SUB)' }] },
   { name: 'acp-anchor-reportingGroup', on: 'anchor/reportingGroup', cse: 'ship',
     grants: [{ who: 'CAnchorShip', ops: 'all' }] },
+  { name: '★ acp-anchorAI (proposed)', on: 'anchorAI AE · aiStatus, anomaly, summary, prognosis, linkForecast', cse: 'ship · shore (copy)',
+    grants: [{ who: '★ CAnchorAgent (the AI writer; not CAdmin)', ops: 'C R' },
+      { who: '★ CAnchorDashboard', ops: 'R Di' }] },
+  { name: '★ acp-fleetAI (proposed)', on: 'fleetAI AE · fleetStatus, conflicts', cse: 'coast (MEC)',
+    grants: [{ who: '★ fleet-AI writer (own originator, not CAdmin)', ops: 'C R' },
+      { who: '★ CAnchorDashboard', ops: 'R Di' }] },
 ]
 
-/** Denied-request tests. Results stay "not run" until executed against the real CSEs. */
+/** Denied-request tests. server/deny_tests.py runs T1–T10 against the CSEs and writes deny-results.json;
+ *  the rest stay "not run" until executed on the full stack. */
+export interface DenyResult { id: string; expected: number; got: number | null; status: 'pass' | 'fail' | 'error' | 'skipped'; note: string; at: string }
+export interface DenyRun { ranAt: string | null; cses: Record<string, string>; results: DenyResult[] }
+
 export const DENY_TESTS: { id: string; test: string; who: string; request: string; expect: string }[] = [
   { id: 'T1', test: 'Dashboard writes sensor data', who: 'CAnchorDashboard', request: 'CREATE cin · ship bridge/attitude', expect: '4103' },
   { id: 'T2', test: 'Dashboard reads the position', who: 'CAnchorDashboard', request: 'RETRIEVE ship bridge/position', expect: '4103' },
@@ -70,4 +80,7 @@ export const TRANSPORT: { hop: string; how: string; open?: boolean }[] = [
   { hop: 'CSE ↔ CSE, core → CSE (HTTPS)', how: 'CA and hostname verification enabled; binding the authenticated caller to its Originator remains open', open: true },
   { hop: 'ESP32 → ship CSE (MQTTS 8883)', how: 'Client certificates required, allow_anonymous=false; binding certificate identity to topics and Originator remains open', open: true },
   { hop: 'Position and AI access', how: 'CAnchorAgent can retrieve and discover six ship sensors, including GPS position. No writes, subscriptions, commands or journal grants. Ship dashboard still cannot read position; shore dashboard can read location-containing events. Use the separate AI identity.' },
+  { hop: 'AI results (anchorAI · fleetAI)', how: 'read by the Shore Monitor as CAnchorDashboard: the shore CSE copy of anchorAI first, else the ship CSE; fleetAI on the coastal CSE · while link A is down no new ship-AI results reach the shore (shown as "Ship not reachable", not an AI failure) · linkForecast lat/lon stripped before storing', open: true },
+  { hop: 'Shore Monitor API (HTTPS 8795)', how: 'loopback by default · beyond loopback: Bearer token (never in a URL or browser storage), or explicit "open": true for a private team network (Tailscale) trusted end to end' },
+  { hop: 'Core tokens on the monitor', how: 'ship and edge only, read-only /status (file tokens, or the tokenless read-only relay on the MEC map server) · the shore core token is refused: it can issue commands', open: true },
 ]

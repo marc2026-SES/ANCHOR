@@ -1,0 +1,44 @@
+{
+  "_comment": "MEC sandbox over Tailscale. CSEs on HTTP NodePorts 30080/81/82. Core link state from the read-only /status relay on the map server (30793/core/<role>/status, GET only, no token; the operator tokens stay on the MEC server). The shore core is left out by design. Run on the laptop; view at http://127.0.0.1:8797/?live",
+  "shore": {
+    "url": "http://100.96.155.4:30081",
+    "root": "cse-in",
+    "csi": "/id-in",
+    "timeout": 5
+  },
+  "edge": {
+    "url": "http://100.96.155.4:30080",
+    "root": "cse-edge",
+    "csi": "/id-edge",
+    "timeout": 5
+  },
+  "ship": {
+    "url": "http://100.96.155.4:30082",
+    "root": "cse-ship",
+    "csi": "/id-ship",
+    "timeout": 5
+  },
+  "notify": {
+    "url": ""
+  },
+  "api": {
+    "bind": "127.0.0.1",
+    "port": 8797
+  },
+  "db": "data/mec.db",
+  "run": {
+    "id": "mec-sandbox",
+    "mode": "anchor",
+    "history_minutes": 60
+  },
+  "cores": {
+    "ship": {
+      "url": "http://100.96.155.4:30793/core/ship",
+      "timeout": 5
+    },
+    "edge": {
+      "url": "http://100.96.155.4:30793/core/edge",
+      "timeout": 5
+    }
+  }
+}

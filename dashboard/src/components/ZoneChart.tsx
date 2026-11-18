@@ -76,7 +76,7 @@ export function ZoneChart(props: {
       yAxis: [0, 1].slice(0, twoAxes ? 2 : 1).map(i => (i === 1 && eventAxis
         ? { type: 'value', min: -0.2, max: 1.2, show: false }
         : { type: 'value', scale: true, axisLabel: { fontSize: 10, color: C.muted },
-            splitLine: { show: i === 0, lineStyle: { color: '#f0f0f2' } } })),
+            splitLine: { show: i === 0, lineStyle: { color: 'rgba(126,180,214,0.12)' } } })),
       series: out,
     }
   }, [records, series, links, start, end, markers])

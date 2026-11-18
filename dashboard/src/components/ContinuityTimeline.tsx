@@ -36,7 +36,7 @@ export function ContinuityTimeline(props: {
         data: x.map((xi, i) => [xi, live[i]]),
         markArea: { silent: true, data: bands(links, end) },
         markLine: { silent: true, symbol: 'none', data: [{ xAxis: now, lineStyle: { color: C.ink, type: 'solid', width: 1 }, label: lab('now', C.ink) }] } },
-      { name: 'Reached shore after waiting', type: 'bar', stack: 'r', itemStyle: { color: C.recovered }, data: x.map((xi, i) => [xi, late[i]]) },
+      { name: 'Reached shore after waiting', type: 'bar', stack: 'r', itemStyle: { color: C.recovered, decal: { symbol: 'rect', color: 'rgba(255,255,255,0.28)', rotation: Math.PI / 4, symbolSize: 1, dashArrayX: [1, 0], dashArrayY: [2, 5] } }, data: x.map((xi, i) => [xi, late[i]]) },
     ]
     if (mode === 'anchor') {
       series.push(
@@ -54,7 +54,7 @@ export function ContinuityTimeline(props: {
       xAxis: { type: 'time', min: start, max: end, axisLabel: { fontSize: 10, color: C.muted, formatter: (v: number) => clock(v).slice(0, 5) },
         axisLine: { lineStyle: { color: C.line } } },
       yAxis: [
-        { type: 'value', axisLabel: { fontSize: 10, color: C.muted }, splitLine: { lineStyle: { color: '#f0f0f2' } } },
+        { type: 'value', axisLabel: { fontSize: 10, color: C.muted }, splitLine: { lineStyle: { color: 'rgba(126,180,214,0.12)' } } },
         { type: 'value', axisLabel: { fontSize: 10, color: C.muted }, splitLine: { show: false } },
       ],
       series,

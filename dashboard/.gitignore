@@ -2,3 +2,13 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# Shore Monitor: real addresses, core API tokens and the SQLite store stay local
+server/shore-monitor.json
+server/secrets/
+server/data/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.tgz
