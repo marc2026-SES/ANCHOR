@@ -17,7 +17,7 @@ relay는 `src/anchor`의 `client`, `config.Endpoint`, `tls`만 쓴다. 설정은
 1. 센서 컨테이너 6개에 구독 `anchor-core`(`nct=1`, `net=[3]`)를 유지한다. 선박 CSE가 새 CIN을 `notify_url`(8790)로 보낸다.
 2. 알림에 담긴 CIN을 schemaVersion 2 envelope으로 감싼다. 이름은 `eventId`에서 정해지는 `e-<sha256 앞 32자>`다.
 3. 선박의 SQLite 큐(`.runtime-ship/relay-queue.db`)에 넣고, 육상 `anchor/events`에 CIN 생성 요청을 **1번** 보낸다.
-4. 실패하면 큐에 남기고 0.5~5초 간격으로 다시 시도한다. 4105(이미 있음)는 전달된 것으로 본다.
+4. 육상이 4105(같은 이름이 이미 있음)를 반환하면 해당 CIN 하나만 GET으로 읽는다. 저장된 `con` 문자열이 선박 큐의 본문과 정확히 일치할 때만 전달 완료로 처리한다. 본문이 다르거나 조회에 실패하면 큐 맨 앞에 원본을 유지하고 0.5~5초 간격으로 재시도한다. 이 기록이 확인될 때까지 뒤의 기록도 대기한다.
 
 envelope 형식과 이름 규칙은 제거 전 코어와 같아서, 육상의 기존 기록·읽는 쪽(Shore Monitor)과 호환된다.
 

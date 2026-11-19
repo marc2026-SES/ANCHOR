@@ -10,7 +10,7 @@
   the CIN carried by each notification. It never lists or re-reads the ship CSE.
 - Each hardware CIN is wrapped in a versioned envelope (schemaVersion 2) and created in
   <shore>/anchor/events under a deterministic name, so a repeated send is a 4105 conflict
-  instead of a duplicate. One request per record.
+  instead of a duplicate. Only a 4105 triggers a GET of that exact CIN to verify its content.
 - Records stay in the SQLite queue until the shore has stored them.
 
 It needs, on the CSEs it talks to (created by the deployment, not by the relay):
@@ -241,6 +241,10 @@ class Relay:
             if exc.http_status in (401, 403) or exc.rsc in (4103, 4107, 5105):
                 self.events_create_confirmed = False
             elif exc.rsc == 4105:
+                target = f'{self.events_parent}/{rn}'
+                stored = self.shore.get(target).get('m2m:cin', {})
+                if stored.get('con') != body:
+                    raise ValueError(f'Stored CIN content differs at {target}') from exc
                 return 'duplicates'
             raise
         if not self.events_create_confirmed:
@@ -271,7 +275,7 @@ class Relay:
                         self.link = {'reachable': False, 'observedAt': time.time()}
                         self.last_error = f'forward: {exc}'[:300]
                     if was is not False:
-                        log('shore unreachable, keeping records queued:', str(exc)[:160])
+                        log('forward failed, keeping records queued:', str(exc)[:160])
                     self.stop.wait(pause)
                     pause = min(RETRY_MAX_S, pause * 2)
                     break
