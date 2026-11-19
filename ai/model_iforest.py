@@ -32,7 +32,7 @@ import sklearn
 from sklearn.ensemble import IsolationForest
 
 import features
-from features import (SRC_CONTAINERS, STRIDE_S, SUBSYSTEMS, WINDOW_S,
+from features import (SRC_CONTAINERS, SUBSYSTEMS,
                       feature_cols, load_csv, subsystem_features)
 
 ROOT = Path(__file__).resolve().parent
@@ -46,6 +46,10 @@ N_ESTIMATORS = 150       # RPi5 윈도우당 50ms 예산 내 (이 머신 기준 
 MAX_SAMPLES = 4096       # 서브샘플이 클수록 범위 밖 이상 대비가 좋았음 (README 참고)
 AUG_FRAC = 0.05          # 경계 증강 비율
 AUG_ALPHA = 1.0          # 특징 범위 확장 배수
+TOL_COPIES = 8           # 허용오차 증강 복제 수 (프로필에 tolerance가 있을 때만)
+TRIM_K = 3.0             # 충격 윈도우 제외 기준: 원점수 중앙값 + K×MAD (프로필 trim일 때만).
+                         # 5였을 땐 2~3분마다 건드린 흔적이 남아 ENGINE 기준이 도달 불가로 올라갔다
+TRIM_MAD_FLOOR = 0.01    # 점수가 거의 상수인 서브시스템에서 기준이 0으로 붙는 것 방지
 
 
 def _augment_boundary(x_fit: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -62,6 +66,55 @@ def _augment_boundary(x_fit: np.ndarray, rng: np.random.Generator) -> np.ndarray
     synth = rng.uniform(lo - AUG_ALPHA * span, hi + AUG_ALPHA * span,
                         size=(n, x_fit.shape[1]))
     return np.vstack([x_fit, synth])
+
+
+def _tolerance_jitter(X: np.ndarray, cols: list[str], rng: np.random.Generator) -> np.ndarray:
+    """허용오차 증강: 센서 정확도 범위의 변동을 정상으로 학습시킨다 (프로필 tolerance).
+
+    눈금이 거친 센서(DHT11 0.1도/1%)는 정상 구간 내내 값이 사실상 상수라 std·slope가
+    정확히 0으로만 학습되고, 한 눈금만 오가도 '본 적 없는 값'으로 critical이 된다.
+    관측 분산이 0일 때 믿을 수 있는 정상 폭은 센서 정확도뿐이므로, 원본 윈도우마다
+    수준 이동(±tol)과 윈도우 내 변동(±tol/4)을 mean/std/rms/max/slope에 물리적으로
+    일관되게 반영한 복제본 TOL_COPIES개를 덧붙인다. tolerance가 없으면 그대로 반환.
+    """
+    idx = {c: i for i, c in enumerate(cols)}
+    targets = [(f"{cont}.{key}", t) for (cont, key), t in features.TOLERANCE.items()
+               if f"{cont}.{key}.mean" in idx]
+    if not targets:
+        return X
+    out = [X]
+    n = len(X)
+    for _ in range(TOL_COPIES):
+        J = X.copy()
+        for p, tol in targets:
+            w = tol / 4.0
+            shift = rng.uniform(-tol, tol, n)        # 수준 이동
+            drift = rng.uniform(-w, w, n)            # 윈도우 안에서 움직인 양
+            noise = rng.uniform(0.0, w / 2.0, n)     # 눈금 오가기(샘플 잡음) 크기
+            mean = X[:, idx[f"{p}.mean"]] + shift
+            std = np.sqrt(X[:, idx[f"{p}.std"]] ** 2 + drift ** 2 / 12.0 + noise ** 2)
+            J[:, idx[f"{p}.mean"]] = mean
+            J[:, idx[f"{p}.std"]] = std
+            J[:, idx[f"{p}.rms"]] = np.sqrt(mean ** 2 + std ** 2)
+            J[:, idx[f"{p}.max"]] = X[:, idx[f"{p}.max"]] + shift + np.abs(drift) / 2.0 + noise
+            J[:, idx[f"{p}.slope"]] = X[:, idx[f"{p}.slope"]] + drift / features.WINDOW_S
+        out.append(J)
+    return np.vstack(out)
+
+
+def _trim_mask(X: np.ndarray, cols: list[str], seed: int) -> np.ndarray:
+    """정상 수집분에 섞인 순간 충격 윈도우를 가려낸다 (프로필 trim, 실데이터용).
+
+    전체 윈도우로 한 번 적합한 뒤 원점수가 중앙값 + TRIM_K×MAD(정규 환산)를 넘는 윈도우를
+    제외한다. 반환은 남길 윈도우의 불리언 마스크.
+    """
+    Xj = _tolerance_jitter(X, cols, np.random.default_rng(seed + 1))
+    probe = IsolationForest(n_estimators=N_ESTIMATORS, max_samples=min(MAX_SAMPLES, len(Xj)),
+                            random_state=seed, n_jobs=-1).fit(Xj)
+    raw = -probe.score_samples(X)
+    med = float(np.median(raw))
+    mad = 1.4826 * float(np.median(np.abs(raw - med)))
+    return raw <= med + TRIM_K * max(mad, TRIM_MAD_FLOOR)
 
 
 def model_path(subsystem: str) -> Path:
@@ -91,9 +144,11 @@ def train(seed: int = 42, val_frac: float = 0.2, csv_path: str | Path | None = N
     card: dict = {
         "trained_at": datetime.now(timezone.utc).strftime(TS_FMT),
         "profile": features.ACTIVE_PROFILE, "train_csv": str(train_csv),
-        "window_s": WINDOW_S, "stride_s": STRIDE_S,
+        "window_s": features.WINDOW_S, "stride_s": features.STRIDE_S,
         "n_estimators": N_ESTIMATORS, "max_samples": MAX_SAMPLES,
         "boundary_aug": {"frac": AUG_FRAC, "alpha": AUG_ALPHA},
+        "tolerance_aug": {"copies": TOL_COPIES,
+                          "tolerance": {f"{c}.{k}": t for (c, k), t in features.TOLERANCE.items()}},
         "seed": seed, "val_frac": val_frac,
         "warn_threshold": round(WARN_T, 4), "critical_threshold": round(CRITICAL_T, 4),
         "sklearn": sklearn.__version__,
@@ -103,8 +158,15 @@ def train(seed: int = 42, val_frac: float = 0.2, csv_path: str | Path | None = N
         fdf = subsystem_features(df, sub)
         cols = feature_cols(fdf)
         X = fdf[cols].to_numpy(dtype=float)
+        n_trimmed = 0
+        if features.TRIM_OUTLIERS:
+            keep = _trim_mask(X, cols, seed)
+            n_trimmed = int((~keep).sum())
+            X = X[keep]
         n_fit = int(len(X) * (1.0 - val_frac))
-        X_fit, X_val = X[:n_fit], X[n_fit:]
+        tol_rng = np.random.default_rng(seed + 1)
+        X_fit = _tolerance_jitter(X[:n_fit], cols, tol_rng)
+        X_val = _tolerance_jitter(X[n_fit:], cols, tol_rng)
 
         X_aug = _augment_boundary(X_fit, np.random.default_rng(seed))
         model = IsolationForest(n_estimators=N_ESTIMATORS,
@@ -127,22 +189,23 @@ def train(seed: int = 42, val_frac: float = 0.2, csv_path: str | Path | None = N
             "feat_mean": X_fit.mean(axis=0), "feat_std": np.maximum(X_fit.std(axis=0), 1e-9),
             "norm_median": med, "norm_span": span,
             "warn": WARN_T, "critical": CRITICAL_T,
-            "window_s": WINDOW_S, "stride_s": STRIDE_S, "seed": seed,
+            "window_s": features.WINDOW_S, "stride_s": features.STRIDE_S, "seed": seed,
         }
         joblib.dump(bundle, model_path(sub))
 
         val01 = normalize(bundle, raw_val)
         card["subsystems"][sub] = {
             "n_features": len(cols),
-            "n_windows_fit": int(n_fit), "n_windows_val": int(len(X_val)),
+            "n_windows_fit": int(n_fit), "n_windows_val": int(len(X) - n_fit),
+            "n_windows_trimmed": n_trimmed,
             "raw_median_val": round(med, 4), "raw_q995_val": round(q995, 4),
             "warn_raw": round(med + span, 4), "critical_raw": round(med + 2 * span, 4),
             "val_fpr_at_warn": round(float((val01 >= WARN_T).mean()), 5),
             "score_ms_per_window": round(ms, 2),
             "model_file": model_path(sub).name,
         }
-        print(f"{sub:<6} features={len(cols):>2} fit={n_fit} val={len(X_val)} "
-              f"warn_raw={med + span:.4f} | {ms:.1f} ms/window")
+        print(f"{sub:<6} features={len(cols):>2} fit={n_fit} val={len(X) - n_fit} "
+              f"trimmed={n_trimmed} warn_raw={med + span:.4f} | {ms:.1f} ms/window")
 
     (MODELS_DIR / "model_card.json").write_text(
         json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8")

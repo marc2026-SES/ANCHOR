@@ -11,12 +11,17 @@
 | `generator.py` | 합성 데이터 생성기 + `to_cin_payload(row)` (oneM2M CIN 바디 변환) |
 | `baseline_rule.py` | config.yaml 임계값 기반 규칙 탐지 + 평가 |
 | `config.yaml` | 규칙 기준선 임계값 |
-| `features.py` | 30s 윈도우(5s stride) 특징 추출 |
+| `features.py` | 윈도우 특징 추출 — 합성 프로필 30s/5s, 선박 프로필 10s/1s |
 | `model_iforest.py` | 서브시스템별 Isolation Forest 학습·점수화 + `to_anomaly_payload(row)` |
 | `evaluate.py` | IF vs 규칙 비교 평가 + 그래프 |
 | `link_forecast.py` | 항로 전방 LTE 커버리지 이탈/복귀 예측 (+단독 시뮬) |
 | `prognosis.py` | 고장 예지: 센서 추세 투영 → 임계값 도달 N분 전 예고 (+단독 시뮬) |
-| `route_conflict.py` | CPA/TCPA 경로 겹침 경고 — anchor-fleet(MEC) 이식용, CSE 무관 |
+| `route_conflict.py` | CPA/TCPA 경로 겹침 계산 — fleet-ai가 쓰는 순수 계산 모듈, CSE 무관 |
+| `tools/fleet_scan.py` | 연안 MEC fleet-ai: 충돌·재해 경고, 태풍·충돌 회피 경로 변경, 항로 이탈 경고 |
+| `fleet_route_model.py` | 배별 항로 학습(최근접 이웃) — 항로 이탈 탐지 모델 |
+| `tools/train_publish.py` | 재학습 모델을 육상 CSE `modelRegistry`에 발행 (모델 배포 루프) |
+| `tools/rebaseline.sh` · `tools/restart_ai.sh` · `tools/deploy_pi.sh` | 선박 Pi: 기준선 재수집 · AE 재시작 · 배포 |
+| `tools/deploy_mec.sh` · `tools/restart_fleet.sh` | 연안 MEC 서버: fleet-ai 설치 · 재시작 |
 | `onem2m_client.py` | oneM2M(ACME) HTTP 클라이언트 — **모든 oneM2M 호출은 여기에만** |
 | `analytics_ae.py` | 분석 AE: 구독 수신 → 윈도우 추론 → anomaly/summary 기록 (+`--replay`) |
 | `tools/feed_csv.py` | 센서 시뮬레이터: CSV를 CIN으로 CSE에 주입 (라이브 데모용) |
@@ -148,7 +153,7 @@ freq_change는 주기 추정 윈도우만큼 지연된다. 이 약점이 ML 모�
 
 ### 특징 (features.py)
 
-30초 슬라이딩 윈도우(5초 stride), 서브시스템별 특징 행렬:
+슬라이딩 윈도우(합성 프로필 30초/5초 stride, 선박 프로필 10초/1초), 서브시스템별 특징 행렬:
 
 | 서브시스템 | 입력 | 특징 |
 |---|---|---|
@@ -171,6 +176,17 @@ freq_change는 주기 추정 윈도우만큼 지연된다. 이 약점이 ML 모�
   IF의 분할값은 학습 데이터 범위 안에서만 생기므로 범위 밖 이상치의 점수가
   포화되는데(범위 밖 둔감), 배경점이 범위 밖 분할을 만들어 이를 해소한다.
   검증 분위수·z-score 통계는 실제 정상 데이터로만 계산.
+- **허용오차 증강**(ship 프로필, `features.PROFILES["ship"]["tolerance"]`): 눈금이 거친
+  센서는 정상 구간 내내 값이 사실상 상수라(DHT11 온도 30.3~30.4°C, 습도 10% 고정, MQ-2
+  0.213V 고정) std·slope가 정확히 0으로만 학습되고, 한 눈금만 오가도 critical이 된다.
+  관측 분산이 0일 때 믿을 수 있는 정상 폭은 센서 정확도뿐이므로, 원본 윈도우마다 수준
+  이동(±tol)과 윈도우 내 변동(±tol/4)을 mean/std/rms/max/slope에 일관되게 반영한 복제본
+  8개를 fit·검증 양쪽에 섞는다. tol: 온도 ±2°C·습도 ±5%RH(DHT11 데이터시트), 가스
+  ±0.05V, 자세각 ±1°(정지 상태 IMU 드리프트). 합성 프로필은 tolerance가 없어 영향 없음.
+- **충격 윈도우 제외**(ship 프로필 `trim`): 실측 '정상' 수집분에 섞인 순간 충격이 검증
+  구간에 하나만 들어가도 q99.5 기준이 그 수준으로 올라가 탐지가 무뎌진다. 전체 윈도우로
+  한 번 적합해 원점수가 중앙값 + 3×MAD를 넘는 윈도우를 빼고 다시 학습한다. (5×MAD로는
+  사람이 2~3분마다 건드린 13분 구간에서 충격이 남아 ENGINE이 진동 40배에도 무반응이었다.)
 - 점수 정규화(0~1): `score01 = clip((raw − median_val) / (3×(q99.5_val − median_val)), 0, 1)`
   (raw = −score_samples). **warn=1/3**은 검증 정상의 상위 0.5% 지점, **critical=2/3**.
 - 근거: fit 분포 기준 z-score 절대값 상위 3개 → `topFeatures`.
@@ -199,7 +215,7 @@ freq_change는 주기 추정 윈도우만큼 지연된다. 이 약점이 ML 모�
    **summary 컨테이너** 생성 — 이미 있으면 재사용
 2. `onem2m.sensors`의 센서 컨테이너마다 subscription 생성(없으면 10초마다 재시도),
    로컬 HTTP 서버(`notification.host:port`)로 notification 수신
-3. 30s 윈도우가 차면 추론 → anomaly flexContainer **UPDATE** + 같은 내용을
+3. 윈도우가 차면 추론 → anomaly flexContainer **UPDATE** + 같은 내용을
    `anomaly/history` 컨테이너 CIN으로도 기록(`anomaly.history_rn`)
    (`anomaly.skip_normal: true`면 normal은 기록 생략, `--record-normal`로 무시 가능)
 4. 1분(`summary.period_s`)마다 센서별 mean/max/min summary CIN 생성 (데이터 시각 기준)
@@ -207,9 +223,14 @@ freq_change는 주기 추정 윈도우만큼 지연된다. 이 약점이 ML 모�
    자동 대체 (`anomaly.fallback_container`)
 6. `BRIDGE/position` 구독은 링크 예측 전용 — 이벤트를 `linkForecast` 컨테이너에 CIN으로 기록
 7. 어느 서브시스템이든 critical 진입 시 알람 group에 fanOut("on"), 전원 해제되면 "off"
-8. `onem2m.poll.enabled: true`면 구독 대신 **폴링 수집** — CIN 경로 디스커버리 차집합,
-   센서 읽기는 `poll.read_originator`(임시 CAdmin). 구독 권한이 없는 팀 CSE에
-   읽기 전용으로 붙을 때 사용 ([config.live.yaml](config.live.yaml): 선박 CSE 직결)
+8. `onem2m.poll.enabled: true`면 구독 대신 **폴링 수집** — 구독 권한이 없는 팀 CSE에
+   읽기 전용으로 붙을 때 사용 ([config.live.yaml](config.live.yaml): 선박 CSE 직결).
+   센서 읽기는 `poll.read_originator`(선박 CSE는 `CAnchorAgent`), 결과 쓰기는 `ae.originator`.
+   - `poll.mode: latest`(기본): 컨테이너별 최신 CIN(`<cnt>/la`) 1건을 센서 주기의 0.7배
+     간격으로 읽고 `ct`로 중복 제거. 요청 비용이 누적 CIN 수와 무관하다.
+   - `poll.mode: discovery`: CIN 경로 전체 디스커버리 차집합. 빠짐은 없지만 비용이 누적
+     CIN 수에 비례한다 — `mni` 없는 컨테이너에 3천 건이 쌓이자 요청당 5초가 걸려 타임아웃이
+     났다(2026-11-19 선박 CSE). 상시 운용에는 쓰지 않는다.
 9. `onem2m.status` 설정 시 `aiStatus` 컨테이너에 주기(30s) 하트비트 CIN
    \{state, profile, windows, levels, sirenOn\} — 대시보드의 "AI 연결 상태" 표시용
 
@@ -303,6 +324,72 @@ python analytics_ae.py --config config.ship.yaml --replay data/ship/train.csv
 육상 CSE 라이브 부착은 ACP(CAnchorAgent) 승인 후 `--config config.ship.yaml`로.
 육상 준비 전엔 **선박 CSE 직결 폴링** `--config config.live.yaml` — 구독 권한 없이
 읽기 전용으로 붙어 `cse-ship/anchorAI/` 아래에 AI 결과를 쓴다 (대시보드 연동).
+
+**창 길이·간격 (선박 프로필 10초/1초).** 합성 프로필은 평가 수치의 기준이라 30초/5초 그대로다.
+선박은 2026-11-19 기준선(13분, 사람이 2~3분마다 테이블을 건드린 환경)으로 후보를 비교해 정했다:
+
+| 창 / 간격 | 진동 warn · critical | 자세각 warn · critical | 비고 |
+|---|---|---|---|
+| 30s / 5s | 5배 · 20배 | +1.5° · +2° | 이전 설정 |
+| 30s / 1s | 12배 · 도달 못 함 | +1.5° · +1.5° | 충격 하나가 창 30개를 오염시켜 오히려 둔해짐 |
+| 20s / 1s | 3배 · 도달 못 함 | +1.5° · +1.5° | |
+| 15s / 1s | — | — | 가스 2s·온습도 5s 주기의 공배수가 아니라 계산 불가 |
+| **10s / 1s** | **2배 · 2배** | +1.5° · +2° | 채택 — 짧은 충격에 민감, 경보는 10초 뒤 해제 |
+
+10초/1초 모델의 나머지 경계: 온도 ±2°C 이내 normal · +2.5°C warn · +3.5°C critical /
+가스 +0.1V warn. 기준선을 다시 잡으면 경계도 달라진다. 모델에는 학습 때의 창·간격이
+기록되고, 프로필과 다른 모델은 기동 시와 `modelRegistry` 핫스왑 시 모두 거부한다.
+1초 간격 추론이 CSE에 초당 쓰기를 쏟지 않도록 anomaly는 등급이 바뀔 때 즉시, 같은 등급이
+이어지는 동안은 5초마다 기록한다.
+
+기준선 재수집은 Pi에서 `bash tools/rebaseline.sh [분]` — 수집 동안 CSE에 요청하지 않고 끝난 뒤
+컨테이너당 1회 조회(`collect_live.py --batch`)한다. 결과는 `models-ship.new`에만 쓰므로 수집
+구간에 배가 움직였는지(분 단위 자세·진동 범위) 확인한 뒤 교체한다.
+
+선박 Pi에서 AE 재시작은 `bash ~/anchor-ai/tools/restart_ai.sh` — ssh 한 줄에 `pkill -f`와
+기동 명령을 함께 쓰면 그 셸까지 죽는다.
+
+### 연안 MEC — fleet-ai (tools/fleet_scan.py · fleet_route_model.py)
+
+배 한 척이 못 보는 선단 전체를 연안 MEC 서버에서 본다. MEC013 위치 API를 2초마다 읽고
+결과를 연안 CSE `cse-edge/fleetAI/`의 `fleetStatus`(30초)·`conflicts`(경고)로 발행한다.
+`conflicts` CIN은 `type`으로 구분한다.
+
+| type | 판단 | 학습 |
+|---|---|---|
+| `fleet_conflict` | 두 배의 직선 투영 CPA/TCPA — warn 0.5nm·20분, danger 0.25nm·10분 | 없음 |
+| `hazard_warning` | 지도 서버 재해 목록: 태풍=이동하는 원, 해일=퍼지는 파면과 만나는 시각. 구역 안·30분 전 danger, 2시간 전 warn (시나리오 시간) | 없음 |
+| `route_deviation` | 과거 항적(위치·침로)에서 가장 가까운 지점까지 거리 ≥1km warn, ≥3km danger, 연속 3회 | 최근접 이웃 |
+| `conflict_avoidance` | 아래 조건에서 경로 변경을 실행했다는 기록 | — |
+
+**항로 이탈에 Isolation Forest를 쓰지 않은 이유.** 시나리오 경로로 만든 가상 항적에서 경유점을
+지나쳐 직진하는 이탈을 시험하면, IF(위치+침로, 배경점 증강)는 길에서 0.5~12km(최악 34km)
+벗어난 뒤에야 warn을 냈고 2건을 놓쳤다. 축에 나란히만 자르는 분할로는 대각선으로 뻗은 가느다란
+항로를 감싸지 못한다. 과거 항적까지의 최근접 거리는 0.3~0.9km(최악 2.3km), 놓침 0건, 정상
+오경보 0~1.1%였다. 학습은 `--track-log`로 쌓인 정상 항적으로 하고(재해 중·대피 중·복귀 직후의
+배는 기록 제외), 한 바퀴를 못 채운 배는 학습을 보류한다.
+
+**경로 변경은 두 경우에만 한다** (`--reroute`, 지도 서버 `POST /api/ships/<배>/route`).
+- 태풍: 구역에 들었거나 들어갈 배를 진로 옆 바다로 보낸다. 육지에 막히는 후보는 건너뛴다.
+- 충돌: 최근접 0.2nm·8분 이내가 2회 연속이고, **둘 중 한 척만 학습된 항로를 벗어나 있을 때**
+  항로를 지키는 배를 상대 뒤쪽으로 비키게 한다. 2026-11-19 실측에서 45분 동안 danger가 7번
+  떴지만 실제로 0.25nm 안으로 접근한 쌍은 없었다(최소 0.43nm) — 배들이 경유점에서 방향을 틀어
+  직선 가정이 빗나간 것이라, danger만으로 경로를 바꾸면 전부 불필요한 변경이 된다.
+
+재해가 끝나거나 상대와 3nm 벌어지면 원래 경로·속력으로 되돌린다. 지도 API가 현재 위치를 맨 앞에
+붙이므로 복귀한 경로는 경유점이 하나 늘어난다. AI가 경로를 건드린 배는 재학습 전까지 이탈 판정을
+보류한다.
+
+```bash
+tools/deploy_mec.sh <계정>@<MEC 서버>          # 설치·자체 테스트·재부팅 자동 시작·기동
+python fleet_route_model.py status              # (MEC에서) 배별 항적 수집 현황
+python fleet_route_model.py train               # 항로 재학습 — 스캐너가 재시작 없이 다시 읽음
+python tools/fleet_scan.py --selftest           # 네트워크 없이 로직 검증
+```
+
+검증 범위: 경고·태풍 회피·복귀·항로 이탈 탐지는 실제 샌드박스에서 확인했다. 충돌 회피는 판단
+로직과 경로 변경·복귀 흐름을 `--selftest`(지도 서버를 흉내 낸 객체)로 검증했고, 실제 충돌
+상황에서의 경로 변경은 재현하지 못했다(20배속 시뮬레이션에서 0.2nm 이내 접근을 만들지 못함).
 
 ### 테스트 ① — CSE 없이 (replay)
 

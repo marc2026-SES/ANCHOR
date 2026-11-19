@@ -23,6 +23,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 
+# 창 길이·간격(초). 프로필이 정하며 set_profile()이 바꾼다 — 다른 모듈은 값을 복사해 두지 말고
+# features.WINDOW_S / features.STRIDE_S 로 읽어야 한다.
 WINDOW_S = 30
 STRIDE_S = 5
 
@@ -40,6 +42,7 @@ PROFILES: dict[str, dict] = {
         "src": {"ENGINE": ["vibration", "temperature", "gas"],
                 "BRIDGE": ["attitude"], "CARGO": ["climate", "hatch"]},
         "tolerant": False,   # 합성 데이터는 주기가 정확 — 윈도우 샘플 수 불일치 불허
+        "window_s": 30, "stride_s": 5,   # README 평가 수치의 기준
     },
     "ship": {
         "sensors": {
@@ -52,6 +55,19 @@ PROFILES: dict[str, dict] = {
         "src": {"ENGINE": ["vibration", "gas"], "BRIDGE": ["attitude"],
                 "CARGO": ["climate", "hatch"]},
         "tolerant": True,    # ESP32 주기 흔들림(~1.05s) — 윈도우를 격자 보간으로 채움
+        # 실선박은 10초 창을 1초마다: 짧은 충격이 창을 크게 차지해 빨리·민감하게 잡히고 10초 뒤
+        # 풀린다. 창은 센서 주기(1·2·5s)의 공배수여야 한다(15초는 불가). 비교 수치는 README.
+        "window_s": 10, "stride_s": 1,
+        # 센서 정확도(±): 정상 구간 내내 값이 한두 눈금에 머무는 센서는 관측 분산이 0이라
+        # 학습 분포만으로는 정상 폭을 알 수 없다 → 이 범위의 변동은 정상으로 학습시킨다.
+        # DHT11 데이터시트 ±2°C / ±5%RH, MQ-2는 규칙 임계(1.0V)의 5%, 자세각은 정지 상태
+        # IMU 드리프트 수준 ±1°(책상 위 15분에 pitch가 0.2° 이동, 규칙 임계는 20°).
+        "tolerance": {("climate", "temp_c"): 2.0, ("climate", "rh"): 5.0,
+                      ("gas", "mq2_v"): 0.05,
+                      ("attitude", "roll"): 1.0, ("attitude", "pitch"): 1.0},
+        # 실측 '정상' 수집분에는 순간 충격(부딪힘·손대기)이 섞인다. 검증 구간에 하나만 들어가도
+        # 경보 기준(q99.5)이 그 충격 수준으로 올라가 탐지가 무뎌지므로 학습 전에 걸러낸다.
+        "trim": True,
     },
 }
 
@@ -59,14 +75,18 @@ SUBSYSTEM_SENSORS = dict(PROFILES["synthetic"]["sensors"])
 SUBSYSTEMS = list(SUBSYSTEM_SENSORS)
 FFT_SENSORS = set(PROFILES["synthetic"]["fft"])
 SRC_CONTAINERS = dict(PROFILES["synthetic"]["src"])
+TOLERANCE: dict[tuple[str, str], float] = {}
+TRIM_OUTLIERS = False
 TOLERANT_WINDOWS = False
 ACTIVE_PROFILE = "synthetic"
 
 
 def set_profile(name: str) -> None:
     """전역 센서 맵을 프로필로 교체 — 특징 계산/파이프라인 생성 전에 호출해야 한다."""
-    global TOLERANT_WINDOWS, ACTIVE_PROFILE
+    global TOLERANT_WINDOWS, ACTIVE_PROFILE, TRIM_OUTLIERS, WINDOW_S, STRIDE_S
     p = PROFILES[name]
+    WINDOW_S, STRIDE_S = int(p["window_s"]), int(p["stride_s"])
+    TRIM_OUTLIERS = bool(p.get("trim", False))
     SUBSYSTEM_SENSORS.clear()
     SUBSYSTEM_SENSORS.update(p["sensors"])
     SUBSYSTEMS[:] = list(SUBSYSTEM_SENSORS)
@@ -74,6 +94,8 @@ def set_profile(name: str) -> None:
     FFT_SENSORS.update(p["fft"])
     SRC_CONTAINERS.clear()
     SRC_CONTAINERS.update(p["src"])
+    TOLERANCE.clear()
+    TOLERANCE.update(p.get("tolerance", {}))
     TOLERANT_WINDOWS = bool(p["tolerant"])
     ACTIVE_PROFILE = name
 

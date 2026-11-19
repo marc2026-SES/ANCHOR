@@ -85,6 +85,22 @@ class OneM2MClient:
                             originator=originator)
         return list((res or {}).get("m2m:uril") or [])
 
+    def cins_created_after(self, cnt_path: str, since_ct: str,
+                           originator: str | None = None) -> list[dict]:
+        """컨테이너의 CIN 중 since_ct('YYYYMMDDTHHMMSS', CSE 시계) 이후 생성분을 내용째 반환.
+
+        rcn=4 + cra 한 요청. 비용이 누적 CIN 수에 비례하므로 주기 폴링이 아닌 일괄 조회용이고,
+        CSE 빌드가 두 파라미터를 지원해야 한다.
+        """
+        res = self.retrieve(f"{cnt_path}?rcn=4&ty={TY_CIN}&cra={since_ct}",
+                            originator=originator)
+        return list(((res or {}).get("m2m:cnt") or {}).get("m2m:cin") or [])
+
+    def latest_cin(self, cnt_path: str, originator: str | None = None) -> dict | None:
+        """컨테이너의 최신 CIN(<cnt>/la). CIN이 없으면 None. 비용이 누적 CIN 수와 무관하다."""
+        res = self.retrieve(f"{cnt_path}/la", originator=originator)
+        return (res or {}).get("m2m:cin")
+
     def create(self, parent_path: str, ty: int, body: dict,
                originator: str | None = None) -> dict:
         status, rsc, payload = self.request("POST", parent_path, ty=ty, body=body,

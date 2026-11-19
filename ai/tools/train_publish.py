@@ -34,10 +34,13 @@ def main() -> None:
     ap.add_argument("--models-dir", default="models-ship")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--skip-train", action="store_true", help="학습 생략, 현재 모델 발행만")
-    ap.add_argument("--registry-url", default="http://100.96.155.4:30081",
-                    help="레지스트리 CSE (기본: 팀 육상 IN-CSE)")
+    ap.add_argument("--registry-url", default="https://100.98.242.10:8443",
+                    help="레지스트리 CSE (기본: 실물 육상 IN-CSE, Pi4)")
+    ap.add_argument("--ca", default=str(ROOT / "certs" / "ship-ca.crt"),
+                    help="레지스트리 CSE의 CA 인증서 (선박·육상 공통 팀 CA)")
     ap.add_argument("--cse-rn", default="cse-in")
-    ap.add_argument("--originator", default="CAnchorAgent")
+    ap.add_argument("--originator", default="CAnchorAI",
+                    help="육상 CSE의 anchorAI AE 소유 originator (선박 AI의 미러 쓰기 이름과 같아야 함)")
     ap.add_argument("--rvi", default="3")
     ap.add_argument("--container", default="modelRegistry")
     args = ap.parse_args()
@@ -65,7 +68,7 @@ def main() -> None:
     version = "v" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     client = OneM2MClient(args.registry_url, args.cse_rn, args.originator,
-                          rvi=args.rvi, timeout=30.0)
+                          rvi=args.rvi, timeout=30.0, ca=args.ca)
     client.ensure_ae("anchorAI", "NanchorAI")
     client.ensure_container("anchorAI", args.container, mni=20)
     payload = {"version": version, "profile": args.profile,
