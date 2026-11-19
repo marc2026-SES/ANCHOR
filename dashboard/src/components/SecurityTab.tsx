@@ -34,7 +34,7 @@ export function SecurityTab() {
             <thead><tr><th>ACP</th><th>Applied to</th><th>CSE</th><th>Who may do what</th></tr></thead>
             <tbody>
               {ACPS.map((a, i) => (
-                <tr key={i}>
+                <tr key={i} className={a.name.includes('★') ? 'star' : ''}>
                   <td className="mono">{a.name}</td>
                   <td>{a.on}</td>
                   <td>{a.cse}</td>
