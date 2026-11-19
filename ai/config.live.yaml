@@ -62,10 +62,13 @@ onem2m:
     members: []
   readers:                  # 산출물 조회+디스커버리(acop 34)를 열어줄 originator
     - CAnchorDashboard      # 예진 대시보드 (2026-11-20 요청)
-  mirror:                   # 결과 이중 기록 — 육상 복제본 (예진 대시보드 1순위 경로)
-    cse_url: http://100.96.155.4:30081   # seslab 육상 IN-CSE (보원 표)
-    cse_rn: cse-in
-    rvi: "3"
+  mirror:                   # 결과 이중 기록 — 육상 복제본들 (다중 대상)
+    - cse_url: http://100.96.155.4:30081   # seslab 육상 IN-CSE (보원 표)
+      cse_rn: cse-in
+      rvi: "3"
+    - cse_url: http://100.98.242.10:8080   # 실물 육상 Pi4 (예진 요청 2026-11-19)
+      cse_rn: cse-in                       # https:8443은 그쪽 CA 파일 받으면 전환
+      rvi: "3"
   model_registry:           # 클라우드 학습→배포 루프 (tools/train_publish.py가 발행)
     enabled: true           # cse_url 생략 시 미러(육상) CSE를 레지스트리로 사용
     container_rn: modelRegistry

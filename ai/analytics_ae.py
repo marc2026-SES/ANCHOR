@@ -351,13 +351,14 @@ class LiveApp:
         self.status_path = f"{self.ae_path}/{self.status_rn}" if self.status_rn else None
 
         self.readers = [str(r) for r in (self.o.get("readers") or [])]  # 조회자(acop 34)
-        mir = self.o.get("mirror") or {}                        # 결과 이중 기록 (육상 등)
-        self.mirror_client = (OneM2MClient(mir["cse_url"], mir.get("cse_rn", "cse-in"),
-                                           self.o["ae"]["originator"],
-                                           rvi=str(mir.get("rvi", self.o.get("rvi", "3"))),
-                                           ca=mir.get("ca_cert", True))
-                              if mir.get("cse_url") else None)
-        self.mirror_ready = False
+        mir = self.o.get("mirror") or []                        # 결과 이중 기록 (다중 대상 가능)
+        mir_list = mir if isinstance(mir, list) else ([mir] if mir.get("cse_url") else [])
+        self.mirror_clients = [OneM2MClient(m["cse_url"], m.get("cse_rn", "cse-in"),
+                                            self.o["ae"]["originator"],
+                                            rvi=str(m.get("rvi", self.o.get("rvi", "3"))),
+                                            ca=m.get("ca_cert", True))
+                               for m in mir_list if m.get("cse_url")]
+        self.mirrors_ready: list[OneM2MClient] = []
         self._mirror_warn_at = 0.0
 
         mr = self.o.get("model_registry") or {}                 # 모델 배포 루프 (핫스왑)
@@ -368,7 +369,9 @@ class LiveApp:
             self.registry_client = (OneM2MClient(mr["cse_url"], mr.get("cse_rn", "cse-in"),
                                                  self.o["ae"]["originator"],
                                                  rvi=str(mr.get("rvi", self.o.get("rvi", "3"))))
-                                    if mr.get("cse_url") else self.mirror_client)
+                                    if mr.get("cse_url")
+                                    else (self.mirror_clients[0] if self.mirror_clients
+                                          else None))
         self._registry_seen = None
         self.models_dir = str((cfg.get("paths") or {}).get("models_dir") or (ROOT / "models"))
         try:
@@ -423,7 +426,7 @@ class LiveApp:
             self.client.ensure_container(self.ae_path, self.status_rn, mni=100)
             print(f"aiStatus 컨테이너: 준비 ({self.status_rn})")
         self._apply_read_acp(self.client)
-        if self.mirror_client:
+        if self.mirror_clients:
             self._setup_mirror()
         if self.registry_client:
             try:
@@ -619,29 +622,28 @@ class LiveApp:
         print(f"조회 ACP 적용: {', '.join(self.readers)} (acop 34, {client.base})")
 
     def _setup_mirror(self) -> None:
-        """육상 CSE에 같은 이름의 산출물 트리를 만들어 이중 기록을 준비."""
-        m = self.mirror_client
+        """미러 대상 CSE들에 같은 이름의 산출물 트리를 만들어 이중 기록을 준비."""
         ae_rel = self.o["ae"]["rn"]
-        try:
-            m.ensure_ae(ae_rel, self.o["ae"]["api"])
-            for rn, mni in self._result_containers():
-                m.ensure_container(ae_rel, rn, mni=mni)
-            self._apply_read_acp(m)
-            self.mirror_ready = True
-            print(f"미러 CSE 준비: {m.base}/{m.cse_rn} — 결과 이중 기록")
-        except (OneM2MError, OSError) as e:
-            print(f"[warn] 미러 CSE 준비 실패: {e} — 이중 기록 비활성")
+        for m in self.mirror_clients:
+            try:
+                m.ensure_ae(ae_rel, self.o["ae"]["api"])
+                for rn, mni in self._result_containers():
+                    m.ensure_container(ae_rel, rn, mni=mni)
+                self._apply_read_acp(m)
+                self.mirrors_ready.append(m)
+                print(f"미러 CSE 준비: {m.base}/{m.cse_rn} — 결과 이중 기록")
+            except (OneM2MError, OSError) as e:
+                print(f"[warn] 미러 준비 실패({m.base}): {e} — 해당 대상 제외")
 
     def _mirror_cin(self, rn: str, body, lbl: list | None = None) -> None:
-        if not self.mirror_ready:
-            return
-        try:
-            self.mirror_client.create_cin(f"{self.o['ae']['rn']}/{rn}", body, lbl=lbl)
-        except (OneM2MError, OSError) as e:
-            now = time.time()
-            if now - self._mirror_warn_at > 60:                 # 경고 스팸 방지
-                self._mirror_warn_at = now
-                print(f"[warn] 미러 기록 실패 {rn}: {e}")
+        for m in self.mirrors_ready:
+            try:
+                m.create_cin(f"{self.o['ae']['rn']}/{rn}", body, lbl=lbl)
+            except (OneM2MError, OSError) as e:
+                now = time.time()
+                if now - self._mirror_warn_at > 60:             # 경고 스팸 방지
+                    self._mirror_warn_at = now
+                    print(f"[warn] 미러 기록 실패 {m.base} {rn}: {e}")
 
     def _check_model_update(self) -> None:
         """레지스트리의 새 모델 CIN을 감지해 해시 검증 후 무중단 교체."""
