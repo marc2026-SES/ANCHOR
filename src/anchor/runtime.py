@@ -37,6 +37,9 @@ class Runtime:
         self._commands = []
         self._source_seen = {}  # optimization only, all authority remains in the CSE
         self._last_nudge = {}
+        self._sources = (0.0, [])
+        self._subscribed = {}
+        self._temperature_event = None
         self.threads = []
 
     @property
@@ -73,8 +76,18 @@ class Runtime:
                 self.quarantine(cin.get('ri', 'unknown'), exc)
         return result
 
+    SOURCE_REFRESH_SECONDS = 30
+
     def sources(self):
-        """Discover labelled hardware containers, including new firmware capabilities."""
+        """Labelled hardware containers. The AE/CNT tree is re-discovered every
+        SOURCE_REFRESH_SECONDS, so new firmware capabilities still appear without a restart."""
+        at, found = self._sources
+        if not found or time.monotonic() - at >= self.SOURCE_REFRESH_SECONDS:
+            found = list(self.discover_sources())
+            self._sources = (time.monotonic(), found)
+        return found
+
+    def discover_sources(self):
         for ae_ref in self.local.children(self.local.root):
             ae = resource(self.local.get(ae_ref))
             if ae.get('ty') != 2 or 'anchor:hardware' not in ae.get('lbl', []):
@@ -88,7 +101,7 @@ class Runtime:
                     yield ref, device, cnt['rn']
 
     def ingest(self):
-        archived = {e['eventId'] for e in self.values(self.journal, 'events', validate_event)}
+        archived = {e['eventId']: e for e in self.values(self.journal, 'events', validate_event)}
         for path, device, sensor in self.sources():
             try:
                 rows = self.local.cins(path)
@@ -102,22 +115,33 @@ class Runtime:
                     fingerprint = digest(payload)
                     event = adapt(cin, payload, device, sensor, self.settings.vessel_id, self.local.endpoint.csi)
                     validate_event(event)
-                    if self._source_seen.get(source_key) == fingerprint and event['eventId'] in archived:
+                    # The journal was read from the CSE in this scan; an identical archived
+                    # event needs no further request. A different body still goes through
+                    # put() and is rejected there as a conflicting immutable record.
+                    if archived.get(event['eventId']) == event:
+                        self._source_seen[source_key] = fingerprint
                         continue
                     self.journal.put('events', event['eventId'], event)
                     self._source_seen[source_key] = fingerprint
                 except (ValueError, KeyError, TypeError) as exc:
                     self.quarantine('/'.join(source_key), exc)
                 # Capacity and CSE failures propagate. Never mark an unarchived source as seen.
+            if time.monotonic() - self._subscribed.get(path, -1e9) < self.SOURCE_REFRESH_SECONDS:
+                continue
             try:
                 subscription = self.local.ensure(path, 23, {'m2m:sub': {
                     'rn': 'anchor-core', 'nu': [self.settings.notify_url], 'enc': {'net': [3]}, 'nct': 1}})
                 if resource(subscription).get('nu') != [self.settings.notify_url]:
                     self.local.update(path + '/anchor-core', {'m2m:sub': {'nu': [self.settings.notify_url]}})
+                self._subscribed[path] = time.monotonic()
             except Exception as exc:
                 self.error('subscription:' + path, exc)  # historical scan still works
 
     def local_tick(self):
+        with self.journal.batch():
+            self._local_tick()
+
+    def _local_tick(self):
         if self.role == 'ship':
             self.ingest()
         events = self.values(self.journal, 'events', validate_event)
@@ -130,9 +154,11 @@ class Runtime:
                        and e['payload'].get('ok') is True and number(e['payload'].get('temp_c'))]
             if climate:
                 newest = max(climate, key=lambda e: e['generatedAt'])
+            if climate and newest['eventId'] != self._temperature_event:
                 self.local.update(self.local.root + '/cargo/temperature', {'cod:tempe': {
                     'curT0': newest['payload']['temp_c'], 'lbl': ['anchor:sdt', 'quality:observed',
                                                                                'event:' + newest['eventId']]}})
+                self._temperature_event = newest['eventId']
         if self.role in ('edge', 'shore'):
             existing = {(r.get('holder'), r.get('eventId')): r for r in self.values(self.journal, 'receipts')}
             for event in events:
@@ -150,6 +176,10 @@ class Runtime:
 
     def transfer_tick(self, peer):
         remote = Journal(self.clients[peer], self.settings)
+        with remote.batch(), self.journal.batch():
+            self._transfer_tick(peer, remote)
+
+    def _transfer_tick(self, peer, remote):
         with self.lock:
             events = list(self._events)
         lookup = {event['eventId']: event for event in events}
@@ -178,7 +208,9 @@ class Runtime:
             if local_receipts.get((holder, event['eventId'])) != receipt:
                 self.journal.put('receipts', holder + ':' + event['eventId'], receipt)
         pending = [e for e in events if e['eventId'] not in accepted]
-        for event in fair_batch(pending, self.settings.batch_size, self.settings.critical_burst):
+        # An identical event already stored at the peer only waits for its receipt.
+        unsent = [e for e in pending if remote_events.get(e['eventId']) != e]
+        for event in fair_batch(unsent, self.settings.batch_size, self.settings.critical_burst):
             try:
                 remote.put('events', event['eventId'], event)
             except ValueError as exc:
