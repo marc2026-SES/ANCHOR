@@ -485,7 +485,8 @@ def setup_cse(args) -> OneM2MClient | None:
     if not args.cse_url:
         return None
     try:
-        c = OneM2MClient(args.cse_url, args.cse_rn, args.cse_originator, rvi="3", timeout=8)
+        c = OneM2MClient(args.cse_url, args.cse_rn, args.cse_originator, rvi="3", timeout=8,
+                         ca=args.cse_ca or True)
         c.ensure_ae("fleetAI", "NanchorFleet")
         c.ensure_container("fleetAI", "conflicts", mni=500)
         c.ensure_container("fleetAI", "fleetStatus", mni=200)
@@ -968,7 +969,9 @@ def main() -> None:
     ap.add_argument("--zone-map", default="mep1=kr-busan,mep2=jp-kyushu",
                     help="역할=zoneId 매핑 (나머지 구역은 cloud 담당)")
     ap.add_argument("--cse-url", default=None,
-                    help="결과 CIN을 쓸 연안 CSE (예: http://100.96.155.4:30080)")
+                    help="결과 CIN을 쓸 연안 CSE (예: https://100.96.155.4:30080)")
+    ap.add_argument("--cse-ca", default=None,
+                    help="연안 CSE가 HTTPS일 때 검증에 쓸 CA 인증서 경로 (샌드박스 CA)")
     ap.add_argument("--cse-rn", default="cse-edge")
     ap.add_argument("--cse-originator", default="CAnchorAgent")
     ap.add_argument("--readers", default="CAnchorDashboard",

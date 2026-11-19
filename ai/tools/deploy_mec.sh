@@ -17,6 +17,9 @@ S "mkdir -p ~/anchor-ai/tools ~/anchor-ai/certs ~/anchor-ai/results"
 scp -i "$KEY" -q onem2m_client.py route_conflict.py link_forecast.py fleet_route_model.py "$HOST:~/anchor-ai/"
 scp -i "$KEY" -q tools/fleet_scan.py tools/restart_fleet.sh "$HOST:~/anchor-ai/tools/"
 scp -i "$KEY" -q certs/mec-sandbox.pem "$HOST:~/anchor-ai/certs/"
+# 연안 CSE(HTTPS) 검증용 샌드박스 CA — 저장소에 없으므로(certs/ 제외) 로컬에 있을 때만 복사한다.
+# 없으면 MEC 서버 관리자에게 ~/anchor-secrets/sandbox-tls/ca.crt 를 certs/sandbox-ca.crt 로 받아 둔다.
+if [ -f certs/sandbox-ca.crt ]; then scp -i "$KEY" -q certs/sandbox-ca.crt "$HOST:~/anchor-ai/certs/"; fi
 
 echo "== 2/4 venv·패키지·자체 테스트 =="
 S 'cd ~/anchor-ai && python3 -m venv .venv && .venv/bin/pip -q install -U pip requests numpy scikit-learn joblib \
@@ -24,7 +27,7 @@ S 'cd ~/anchor-ai && python3 -m venv .venv && .venv/bin/pip -q install -U pip re
    && .venv/bin/python fleet_route_model.py selftest'
 
 echo "== 3/4 재부팅 자동 시작 등록 =="
-LINE='@reboot cd ~/anchor-ai && setsid .venv/bin/python -u tools/fleet_scan.py --base-url https://100.96.155.4/sbx3btt489/mep1/location/v3 --ca certs/mec-sandbox.pem --time-scale 20 --interval 2 --minutes 10080 --cse-url http://100.96.155.4:30080 --map-url http://100.96.155.4:30793 --reroute --track-log results/tracks.jsonl --route-models models-fleet >> fleet.log 2>&1 < /dev/null'
+LINE='@reboot cd ~/anchor-ai && setsid .venv/bin/python -u tools/fleet_scan.py --base-url https://100.96.155.4/sbx3btt489/mep1/location/v3 --ca certs/mec-sandbox.pem --time-scale 20 --interval 2 --minutes 10080 --cse-url https://100.96.155.4:30080 --cse-ca certs/sandbox-ca.crt --map-url http://100.96.155.4:30793 --reroute --track-log results/tracks.jsonl --route-models models-fleet >> fleet.log 2>&1 < /dev/null'
 S "(crontab -l 2>/dev/null | grep -v fleet_scan.py; echo '$LINE') | crontab -"
 
 echo "== 4/4 기동 =="
