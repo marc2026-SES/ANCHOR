@@ -1,0 +1,107 @@
+# ANCHOR AI 설정
+# - thresholds: 규칙 기준선(baseline_rule.py)
+# - onem2m: 분석 AE(analytics_ae.py) / oneM2M 클라이언트(onem2m_client.py)
+
+ship_id: SHIP-01
+
+# ---- oneM2M (ACME CSE) ----
+# 팀 권한표(2026-11-16) 기준: AI 에이전트는 육상 IN-CSE에 붙는다.
+# ACME 기본값(cse-in, /id-in)이 팀 육상 CSE 설정과 동일 — 로컬 개발은 주소만 127.0.0.1.
+# 육상 실주소: http://10.251.196.64:8080 (핫스팟) / 복제 센서 트리: ship-gw/<노드>/<센서>
+onem2m:
+  cse_url: http://127.0.0.1:8080
+  cse_rn: cse-in          # ACME cseRN (팀 육상과 동일)
+  cse_id: /id-in          # ACME CSE-ID (팀 육상과 동일)
+  rvi: "3"                # 팀 공통 RVI (하드웨어·core 전부 3)
+  ae:
+    rn: anchorAI
+    api: NanchorAI        # App-ID ('N' 또는 'R'로 시작)
+    originator: CAnchorAgent # 팀 권한표 확정값 (AI 에이전트 — 표의 예시명을 그대로 채택)
+  notification:           # 구독 notification 수신용 로컬 HTTP 서버
+    host: 127.0.0.1
+    port: 9999
+    path: /notify
+  sensors:                # 구독할 센서 컨테이너 (CSE 루트 기준 구조적 경로)
+                          # 실데이터 전환 시 육상 복제 경로(ship-gw/bridge/attitude 등 6개)로
+                          # 교체 — 센서 키·주기 적응 작업과 함께 일괄 변경
+    - SHIP-01/BRIDGE/position   # 링크 예측용 위치 (윈도우 추론에는 미사용)
+    - SHIP-01/BRIDGE/attitude
+    - SHIP-01/ENGINE/vibration
+    - SHIP-01/ENGINE/temperature
+    - SHIP-01/ENGINE/gas
+    - SHIP-01/CARGO/climate
+    - SHIP-01/CARGO/hatch
+  anomaly:
+    rn: anomaly
+    cnd: edu.anchor.anomaly   # flexContainer containerDefinition
+    key: anchor:anm           # flexContainer JSON 키 (acme/anchor-anomaly.fcp 와 일치)
+    history_rn: history       # 이력 CIN 컨테이너(anomaly 하위) — oneM2M 파트 누락 복구(eventId 대조) 대상
+    skip_normal: true         # level이 normal이면 기록 생략
+    fallback_container: true  # flexContainer 생성 실패(정책 미등록 등) 시 container+CIN으로 대체
+  summary:
+    rn: summary
+    period_s: 60              # 1분 요약 CIN 주기
+  status:
+    rn: aiStatus              # 대시보드용 AI 상태 하트비트 CIN 컨테이너
+    period_s: 30
+  link_forecast:
+    container_rn: linkForecast  # 링크 예측 이벤트 CIN 컨테이너 (파라미터는 최하단 link_forecast)
+  prognosis:
+    container_rn: prognosis     # 고장 예지 이벤트 CIN 컨테이너 (파라미터는 최하단 prognosis)
+  actuators:                  # 이상 critical 시 group fanOut으로 제어할 액추에이터
+    group_rn: grpAlarm
+    on_level: critical        # 이 레벨 진입 시 ON, 전부 해제되면 OFF
+    members:                  # 멤버 컨테이너 (CSE 루트 기준, ESP32 alarm 노드 대응)
+      - SHIP-01/ALARM/siren
+      - SHIP-01/ALARM/beacon
+
+# ---- 규칙 기준선 ----
+
+paths:
+  eval_csv: data/eval/eval.csv
+  events_json: data/eval/events.json
+  results_json: results/baseline.json
+
+thresholds:
+  gas_ppm_max: 50.0        # ENGINE/gas: ppm 초과 시 알람 (spike 대응)
+  engine_temp_max_c: 95.0  # ENGINE/temperature: 초과 시 알람 (drift 대응)
+  vib_rms_max: 2.2         # ENGINE/vibration: rms 초과 시 알람 (level_shift 대응)
+  roll_period_min_s: 8.0   # BRIDGE/attitude: roll 주기 정상 하한 (freq_change 대응)
+  roll_period_max_s: 12.0  # BRIDGE/attitude: roll 주기 정상 상한
+  roll_window_s: 60        # roll 주기(zero-crossing) 추정 윈도우, 초
+  cargo_temp_max_c: 8.0    # CARGO/climate: temp 초과 시 알람 (cargo_temp 대응)
+  hatch_sog_min_kn: 3.0    # 이 속력(kn) 초과 항해 중 hatch open이면 알람 (hatch_open 대응)
+
+# ---- 링크(통신) 예측 (link_forecast.py) ----
+# 연안 LTE 커버리지(원형 셀) — MEC 파트의 대한해협 시나리오(anchor-korea-strait)와 같은 해역.
+# 좌표·반경은 실제 지리 근사값: 선배 scenario/gen_anchor.py의 실제 셀 좌표를 받으면 교체할 것.
+# seed 42 eval 항로(쓰시마 북동→하카타) 기준: ~12:15 tsushima-north 이탈 → VSAT → ~16:29 fukuoka 복귀
+link_forecast:
+  enabled: true
+  horizon_min: 30     # 전방 예측 범위(분)
+  step_s: 30          # 전방 샘플 간격(초)
+  interval_s: 15      # 재계산 최소 간격(데이터 시각 기준, 초)
+  warn_min: 10        # 이탈 예상이 이 안이면 loss_predicted 이벤트
+  lte_cells:          # 한국 LTE-M 2 (r45km) + 일본 연안 LTE 5
+    - {name: busan,          lat: 35.08, lon: 129.06, radius_km: 45.0}
+    - {name: geoje,          lat: 34.88, lon: 128.60, radius_km: 45.0}
+    - {name: tsushima-north, lat: 34.66, lon: 129.45, radius_km: 30.0}
+    - {name: tsushima-south, lat: 34.18, lon: 129.26, radius_km: 30.0}
+    - {name: iki,            lat: 33.75, lon: 129.69, radius_km: 28.0}
+    - {name: fukuoka,        lat: 33.62, lon: 130.38, radius_km: 45.0}
+    - {name: shimonoseki,    lat: 33.95, lon: 130.93, radius_km: 40.0}
+
+# ---- 고장 예지 (prognosis.py) ----
+# 센서 추세(최소제곱 기울기)를 전방 투영해 "이 추세면 N분 뒤 임계값 도달"을 미리 알린다.
+# 각 채널의 임계값은 위 thresholds 섹션 값을 참조한다 (중복 정의 금지).
+prognosis:
+  enabled: true
+  trend_min: 5        # 추세 추정 창(분)
+  warn_min: 10        # 도달 예상이 이 안이면 threshold_predicted
+  min_eta_s: 60       # 이보다 임박한 도달은 생략 — 급변(spike)은 규칙/IF 몫
+  interval_s: 15      # 채널당 재계산 최소 간격(데이터 시각 기준, 초)
+  channels:
+    - {subsystem: ENGINE, container: temperature, key: temp, threshold: engine_temp_max_c}
+    - {subsystem: ENGINE, container: gas,         key: ppm,  threshold: gas_ppm_max}
+    - {subsystem: ENGINE, container: vibration,   key: rms,  threshold: vib_rms_max}
+    - {subsystem: CARGO,  container: climate,     key: temp, threshold: cargo_temp_max_c}

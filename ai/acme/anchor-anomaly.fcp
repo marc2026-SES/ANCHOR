@@ -1,0 +1,19 @@
+// ANCHOR AI — anomaly flexContainer specialization (ACME CSE 정책 파일)
+// 사용법: 이 파일을 ACME의 init 디렉터리(패키지 설치 시 .../site-packages/acmecse/init/)에
+// 복사한 뒤 CSE를 재시작한다. config.yaml의 onem2m.anomaly.{key,cnd} 와 일치해야 한다.
+[
+    {
+        "type"      : "anchor:anm",
+        "lname"     : "anchorAnomaly",
+        "cnd"       : "edu.anchor.anomaly",
+        "attributes": [
+            { "sname" : "sbs",  "lname" : "subsystem",     "type" : "string", "car" : "01" },
+            { "sname" : "lvl",  "lname" : "level",         "type" : "string", "car" : "01" },
+            { "sname" : "scr",  "lname" : "score",         "type" : "float",  "car" : "01" },
+            { "sname" : "tpf",  "lname" : "topFeatures",   "type" : "string", "car" : "01" },
+            { "sname" : "wst",  "lname" : "windowStart",   "type" : "string", "car" : "01" },
+            { "sname" : "wen",  "lname" : "windowEnd",     "type" : "string", "car" : "01" },
+            { "sname" : "srcc", "lname" : "srcContainers", "type" : "string", "car" : "01" }
+        ]
+    }
+]
