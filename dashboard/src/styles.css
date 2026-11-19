@@ -612,3 +612,28 @@ body { background:
 .ship-stage.stale::before, .ship-stage.stale::after { animation-play-state: paused; opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) { .ship-stage::before, .ship-stage::after { animation: none; } }
 @media (max-width: 640px) { .ship-stage svg { max-width: 100%; } }
+
+/* ── AI tab: HUD readouts, chamfered banners ─────────────────────────────── */
+.ai-top { gap: 14px; }
+.ai-state { clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  padding: 9px 14px; }
+.ai-state b { letter-spacing: 0.01em; }
+.ai-level { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+.ai-level small { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+.ai-facts { display: flex; flex-wrap: wrap; gap: 10px 34px; margin: 12px 2px 8px; }
+.ai-facts div { display: flex; flex-direction: column; }
+.ai-facts dt { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.ai-facts dd { margin: 0; font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; color: #e8f2f9; }
+.ai-score { height: 14px; border-radius: 2px; }
+.ai-score span { line-height: 14px; }
+.ai-score i { box-shadow: 0 0 10px rgba(189, 140, 55, 0.5); }
+.ai-score i.critical { box-shadow: 0 0 10px rgba(217, 96, 79, 0.55); }
+
+/* ── Security tab: row life + the rows this bootstrap adds ───────────────── */
+table.grid tbody tr { transition: background 0.12s; }
+table.grid tbody tr:nth-child(even) td { background: rgba(95, 195, 239, 0.03); }
+table.grid tbody tr:hover td { background: rgba(95, 195, 239, 0.07); }
+table.acp tr.star td { background: rgba(189, 140, 55, 0.07); }
+table.acp tr.star:hover td { background: rgba(189, 140, 55, 0.12); }
+table.acp tr.star td:first-child { box-shadow: inset 2px 0 0 rgba(232, 184, 101, 0.8); }
+table.acp .grant .who { color: #c9dcea; }
