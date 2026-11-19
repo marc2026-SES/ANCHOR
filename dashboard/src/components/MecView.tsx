@@ -171,7 +171,17 @@ function FlCard({ live }: { live: boolean }) {
 const n2 = (x?: number) => (x ?? 0).toLocaleString()
 
 export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | null; inUrl?: string | null; now: number; live: boolean }) {
-  const IN = inUrl || '/'
+  // ui.in_url rides on /api/run, which disappears while the shore CSE has no open run;
+  // /api/health answers regardless, so navigation never depends on the run state.
+  const [healthIn, setHealthIn] = useState<string | null>(null)
+  useEffect(() => {
+    if (!live) return
+    fetch('/api/health', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(h => setHealthIn(h?.inUrl ?? null))
+      .catch(() => undefined)
+  }, [live])
+  const IN = inUrl || healthIn || '/'
   // The map is someone else's page, but it is relayed same-origin (/map/), so a click on anything
   // labelled ship-001 inside it (marker tooltip, popup, the Ships list) can open the IN dashboard.
   const frameRef = useRef<HTMLIFrameElement>(null)
@@ -214,11 +224,11 @@ export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | 
           : <div className="cam-empty" style={{ height: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <b>Live runs only</b></div>}
       </section>
+      <FlCard live={live} />
       {fleet ? <FleetCard fleet={fleet} now={now} live={live} /> : (
         <section className="panel"><header className="panel-head"><h3>Fleet (coastal AI)</h3></header>
           <p className="empty">fleet.enabled is off in the monitor config.</p></section>
       )}
-      <FlCard live={live} />
     </div>
   )
 }
