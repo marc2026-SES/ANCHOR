@@ -30,7 +30,11 @@ relay는 자원이나 ACP를 만들지 않는다. 아래가 미리 있어야 한
 | 선박 | `bridge/{attitude,position}`, `engine/{vibration,gas}`, `cargo/{climate,hatch}` | 조회, 구독 생성 |
 | 육상 | `anchor/events` | CIN 생성 (C·R·Di = 35) |
 
-현장 CSE에는 제거 전 bootstrap이 만든 ACP가 그대로 있다. **새로 초기화한 CSE에는 이 권한을 만드는 절차가 저장소에 없다**(bootstrap이 코어와 함께 제거됨).
+새 CSE를 시작한 뒤 각 호스트에서 한 번 `./deploy/<role>/run.sh acp-provision`을 실행한다. 역할은 `ship`, `edge`, `shore` 중에서 고른다. 이 명령은 해당 CSE에 `main`과 같은 ACP와 리소스별 연결을 설정한다. 정책을 다시 설치할 때는 달라진 권한과 연결만 갱신한다.
+
+연안 CSE를 Compose로 배포했다면 저장소 루트에서 `docker compose -f deploy/edge/compose.yaml exec edge-cse python -m anchor.provision --config /config/host.container.json`을 실행한다.
+
+릴레이의 대상 CSE, 요청자, 컨테이너, 작업(CREATE), 리소스 타입(CIN)은 실행 중 고정된다. 릴레이는 이 조합의 첫 CREATE 성공을 메모리 한 칸에 기록한다. CSE가 권한을 거부하면 즉시 비우고 해당 기록을 큐에 남긴다. 첫 전송과 이후 전송 모두 별도 권한 조회 요청은 0회다.
 
 ## 하지 않는 것
 

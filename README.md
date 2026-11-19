@@ -4,6 +4,8 @@ oneM2M Hackathon 2026 · 팀 Ctrl+Sea
 
 **현재 상태** · 애플리케이션 코어를 제거했다. 아래의 코어 구조와 명령은 이전 버전의 기록이다. 현재 실행 가능한 구성은 역할별 `cse.ini`와 `host.json`을 사용하는 ACME CSE, 센서 펌웨어, 독립 DDS 경로다. DDS IPE 자원은 `./deploy/edge/run.sh dds-provision`으로 준비한다.
 
+새 배포에서는 각 CSE를 시작한 뒤 해당 호스트에서 `./deploy/<role>/run.sh acp-provision`을 한 번 실행한다. 역할은 `ship`, `edge`, `shore` 중에서 고른다. [선박 릴레이](hardware/ship-gateway-pi5/sync/README.md)는 설치된 ACP로 육상에 전송한다.
+
 실제 ESP32 센서를 선박 Pi가 수집하고, 별도 연안 호스트가 데이터를 보관하여 육상으로 전달한다. **선박→연안과 연안→육상이 동시에 연결되어 있을 필요가 없다.** 육상 명령도 연안에 사전 보관했다가 선박에 전달한다.
 
 `anchor`는 실물 통합 실행 경로다. 이전 온도·팬·부저 모의 구현은 `src/anchor/lab/`과 `anchor-lab`으로 분리했다. 새 실행 경로는 모의 측정이나 장치 성공 결과를 만들지 않는다.

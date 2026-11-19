@@ -1,4 +1,4 @@
-"""Resource provisioning helpers for the standalone DDS IPE."""
+"""Provision oneM2M access policies through the local CSE."""
 from .client import resource
 
 
@@ -23,7 +23,8 @@ def policy(admin, name, grants):
     value = {'pv': {'acr': rules},
              'pvs': {'acr': [{'acor': ['CAdmin'], 'acop': 63}]}}
     result = resource(admin.ensure(admin.root, 1, {'m2m:acp': {'rn': name, **value}}))
-    admin.update(admin.root + '/' + name, {'m2m:acp': value})
+    if any(result.get(key) != ruleset for key, ruleset in value.items()):
+        admin.update(admin.root + '/' + name, {'m2m:acp': value})
     return result['ri']
 
 
@@ -32,28 +33,18 @@ def resource_policy(admin, path, grants):
     return policy(admin, 'acp-' + path.replace('/', '-'), grants)
 
 
-def assign_policy(admin, path, tag, acpi, owner):
-    current = resource(admin.get(path))
-    # Initial acpi assignment is restricted to the creator even for CAdmin.
+def assign_policy(admin, path, tag, acpi, owner, current):
+    if current.get('acpi') == [acpi]:
+        return
+    # Only the creator can assign the initial acpi.
     actor = admin if current.get('acpi') else admin.as_origin(owner)
     actor.update(path, {tag: {'acpi': [acpi]}})
 
 
-def container(admin, parent, name, acpi=None, labels=None, owner='CAdmin'):
-    attrs = {'rn': name}
-    if acpi:
-        attrs['acpi'] = [acpi]
-    if labels:
-        attrs['lbl'] = labels
-    result = resource(admin.ensure(parent, 3, {'m2m:cnt': attrs}))
-    # Existing hardware CNTs had silent FIFO eviction. Preserve their contents,
-    # remove the limits, then verify the CSE did not restore its defaults.
-    if acpi:
-        assign_policy(admin, parent + '/' + name, 'm2m:cnt', acpi, owner)
-    admin.update(parent + '/' + name, {'m2m:cnt': {'mni': None, 'mbs': None, 'mia': None}})
-    if labels:
-        admin.update(parent + '/' + name, {'m2m:cnt': {'lbl': labels}})
-    result = resource(admin.get(parent + '/' + name))
-    if any(result.get(key) is not None for key in ('mni', 'mbs', 'mia')):
-        raise RuntimeError('Set [resource.cnt] enableLimits=false in ACME and restart before bootstrap')
-    return result
+def protected_container(admin, path, grants, owner='CAdmin'):
+    acpi = resource_policy(admin, path, grants)
+    full = admin.root + '/' + path
+    parent, name = full.rsplit('/', 1)
+    row = resource(admin.ensure(parent, 3, {'m2m:cnt': {'rn': name, 'acpi': [acpi]}}))
+    assign_policy(admin, full, 'm2m:cnt', acpi, owner, row)
+    return row

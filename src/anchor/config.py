@@ -7,6 +7,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROLES = ("ship", "edge", "shore")
+ORIGINS = {role: "CAnchor" + role.title() for role in ROLES}
+DEVICES = {"bridge": "CBridge", "engine": "CEngine", "cargo": "CCargo"}
+SENSORS = {"bridge": ("attitude", "position"), "engine": ("vibration", "gas"),
+           "cargo": ("climate", "hatch")}
+
+
 @dataclass(frozen=True)
 class Endpoint:
     url: str
@@ -34,12 +40,15 @@ class Settings:
     tls_key: str = ""
     tls_ca: str = ""
     dds_ipe_enabled: bool = False
+    dashboard_edge_read: bool = False
 
     def __post_init__(self):
         if self.role not in ROLES or self.role not in self.nodes:
             raise ValueError("A local endpoint is required for ship, edge or shore")
         if not self.vessel_id or ":" in self.vessel_id:
             raise ValueError("vessel_id must be nonempty and contain no colon")
+        if type(self.dashboard_edge_read) is not bool:
+            raise ValueError('dashboard_edge_read must be a boolean')
         if type(self.dds_ipe_enabled) is not bool or (self.dds_ipe_enabled and self.role != 'edge'):
             raise ValueError('dds_ipe_enabled is a boolean for the edge role only')
 

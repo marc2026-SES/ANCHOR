@@ -34,7 +34,7 @@ def prepare(role):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) < 2 or argv[0] not in ('ship', 'edge', 'shore'):
-        raise ValueError('Usage: deploy/<role>/run.sh check|init-cse|cse|dashboard|dds|dds-check|dds-provision')
+        raise ValueError('Usage: deploy/<role>/run.sh check|init-cse|acp-provision|cse|dashboard|dds|dds-check|dds-provision')
     role, action, *rest = argv
     config, settings, runtime = prepare(role)
     python = Path(os.environ.get('ANCHOR_VENV', ROOT / '.venv')) / 'bin/python'
@@ -71,6 +71,10 @@ def main(argv=None):
             raise ValueError('CSE MQTTS and certificate verification are required')
         os.chdir(target)
         command = [str(python), '-m', 'anchor.acme_tls', '--headless', '--base-directory', str(target), '--config', 'acme.ini', *rest]
+    elif action == 'acp-provision':
+        if rest:
+            raise ValueError('ACP provisioning uses the fixed role config')
+        command = [str(python), '-m', 'anchor.provision', '--config', str(config)]
     elif action in ('dds', 'dds-check', 'dds-provision'):
         if role == 'shore':
             raise ValueError('DDS runs on the ship publisher and coastal IPE only')

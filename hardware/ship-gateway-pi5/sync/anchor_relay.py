@@ -180,6 +180,10 @@ class Relay:
         self.config = config
         self.ship = Client(config.nodes['ship'], config.origin)
         self.shore = Client(config.nodes['shore'], config.origin)
+        # This worker has exactly one permission key for its lifetime:
+        # shore CSE + configured origin + anchor/events + CREATE + CIN (4).
+        self.events_parent = self.shore.root + '/anchor/events'
+        self.events_create_confirmed = False
         self.queue = Queue(queue_path)
         self.sources = {}  # container ri -> (device, sensor)
         self.stop = threading.Event()
@@ -230,8 +234,20 @@ class Relay:
         return bool(added)
 
     # ---- shore side ------------------------------------------------------------------------
+    def forward_record(self, rn, body):
+        try:
+            self.shore.create(self.events_parent, 4, {'m2m:cin': {'rn': rn, 'cnf': 'application/json:0', 'con': body}})
+        except OneM2MError as exc:
+            if exc.http_status in (401, 403) or exc.rsc in (4103, 4107, 5105):
+                self.events_create_confirmed = False
+            elif exc.rsc == 4105:
+                return 'duplicates'
+            raise
+        if not self.events_create_confirmed:
+            self.events_create_confirmed = True
+        return 'forwarded'
+
     def forward_loop(self):
-        parent = f'{self.shore.root}/anchor/events'
         pause = 0.5
         while not self.stop.is_set():
             rows = self.queue.head(BATCH)
@@ -243,13 +259,7 @@ class Relay:
                 if self.stop.is_set():
                     return
                 try:
-                    try:
-                        self.shore.create(parent, 4, {'m2m:cin': {'rn': rn, 'cnf': 'application/json:0', 'con': body}})
-                        key = 'forwarded'
-                    except OneM2MError as exc:
-                        if exc.rsc != 4105:  # anything but "already there" keeps the record queued
-                            raise
-                        key = 'duplicates'
+                    key = self.forward_record(rn, body)
                     self.queue.done(row_id)
                     with self.lock:
                         self.stats[key] += 1

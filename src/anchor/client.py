@@ -12,8 +12,9 @@ from .config import Endpoint
 
 
 class OneM2MError(RuntimeError):
-    def __init__(self, rsc, body, target):
+    def __init__(self, rsc, body, target, http_status=None):
         self.rsc, self.body, self.target = rsc, body, target
+        self.http_status = http_status
         super().__init__(f"oneM2M {rsc} at {target}: {body}")
 
 
@@ -60,8 +61,8 @@ class Client:
         except ValueError:
             data = {'error': response.text[:300]}
         rsc = int(response.headers.get('X-M2M-RSC', 5000))
-        if not 2000 <= rsc < 3000:
-            raise OneM2MError(rsc, data, target)
+        if response.status_code in (401, 403) or not 2000 <= rsc < 3000:
+            raise OneM2MError(rsc, data, target, response.status_code)
         return data
 
     def get(self, path, **kwargs):

@@ -15,6 +15,7 @@ services:
     volumes:
       - edge-cse-data:/var/lib/acme
       - ./cse.ini:/etc/anchor/edge.ini:ro
+      - ./host.container.json:/config/host.container.json:ro
       - ../../.runtime-edge/tls:/secrets/tls:ro
   edge-dds-ipe:
     profiles: ["dds"]
