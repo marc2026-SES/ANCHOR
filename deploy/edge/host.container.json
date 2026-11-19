@@ -1,0 +1,19 @@
+{
+  "role": "edge",
+  "vessel_id": "ship-001",
+  "tls_ca": "/secrets/tls/ca.crt",
+  "tls_cert": "/secrets/tls/server.crt",
+  "tls_key": "/secrets/tls/server.key",
+  "dashboard_edge_read": true,
+  "dds_ipe_enabled": true,
+  "nodes": {
+    "edge": {
+      "url": "https://127.0.0.1:8080",
+      "root": "cse-edge",
+      "csi": "/id-edge",
+      "rvi": "3",
+      "timeout": 3,
+      "ca": "/secrets/tls/ca.crt"
+    }
+  }
+}

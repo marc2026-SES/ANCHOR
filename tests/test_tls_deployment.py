@@ -118,7 +118,7 @@ def test_issuance_never_overwrites_keys_and_separates_devices(pki):
 
 @pytest.mark.parametrize('role', ['ship', 'edge', 'shore'])
 def test_deployment_configs_resolve_tls_and_reject_downgrade(tmp_path, role):
-    path = ROOT / 'deploy' / role / 'core.json'
+    path = ROOT / 'deploy' / role / 'host.json'
     cfg = Settings.load(path)
     assert cfg.role == role
     assert Path(cfg.tls_key) == ROOT / ('.runtime-' + role) / 'tls/server.key'
@@ -164,7 +164,8 @@ def test_role_archive_contains_only_its_deployment_and_no_secrets(tmp_path, role
         names = handle.getnames()
         assert handle.extractfile('.anchor-role').read().decode().strip() == role
         assert f'deploy/{role}/run.sh' in names
-        assert 'src/anchor/runtime.py' in names
+        assert 'src/anchor/acme_tls.py' in names
+        assert 'src/anchor/runtime.py' not in names
         for other in {'ship', 'edge', 'shore'} - {role}:
             assert not any(name.startswith(f'deploy/{other}/') for name in names)
         assert not any(name.endswith(('.key', '.pem', '.crt', '_tls.h')) for name in names)
@@ -177,7 +178,7 @@ def test_role_archive_contains_only_its_deployment_and_no_secrets(tmp_path, role
 
 def test_role_launcher_rejects_cross_role_config_and_command(monkeypatch, tmp_path):
     launcher = script('role')
-    with pytest.raises(ValueError, match='Only shore'):
+    with pytest.raises(ValueError, match='Unsupported action'):
         launcher.main(['ship', 'command'])
     with pytest.raises(ValueError, match='no sensor'):
         launcher.main(['edge', 'dashboard'])
@@ -193,17 +194,3 @@ def test_pinned_acme_adapter_installs_without_changing_upstream():
         'from anchor.acme_tls import install_adapter; install_adapter(); install_adapter()'],
         capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
-
-
-def test_existing_http_subscription_migrates_to_https():
-    from tests.fake_cse import MemoryCSE
-    from anchor.runtime import Runtime
-    endpoint = Endpoint('https://ship.local', 'cse-ship', '/id-ship')
-    cfg = Settings('ship', {'ship': endpoint}, notify_url='https://ship.local:8790/notify')
-    cse = MemoryCSE(endpoint)
-    runtime = Runtime(cfg, {'ship': cse.client('CAnchorShip')})
-    runtime.provision()
-    path = 'cse-ship/bridge/attitude'
-    runtime.local.ensure(path, 23, {'m2m:sub': {'rn': 'anchor-core', 'nu': ['http://old:8790/notify']}})
-    runtime.ingest()
-    assert resource(runtime.local.get(path + '/anchor-core'))['nu'] == [cfg.notify_url]

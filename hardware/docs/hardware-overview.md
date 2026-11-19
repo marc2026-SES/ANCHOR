@@ -1,3 +1,5 @@
+> 이 문서는 TLS 전환 전 하드웨어·구 SQLite 동기화 구성의 과거 기록입니다. 아래 HTTP 주소와 통신 리허설 결과를 현재 HTTPS·MQTTS 구현의 실행 지침이나 검증 결과로 사용하지 않습니다. 현행 배포는 [루트 README](../../README.md), 통합 구현 설명은 로컬 `docs/ANCHOR_OVERVIEW.pdf`·`.md`를 따릅니다.
+
 # ANCHOR 하드웨어 구성 현황
 
 Ctrl+Sea · 2026-11-15 기준 · 실제로 연결하고 동작을 확인한 구성

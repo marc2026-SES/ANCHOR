@@ -11,7 +11,6 @@ from anchor.dds.config import Config, QoS
 from anchor.dds.model import Window, validate_batch
 from anchor.dds.resources import ORIGIN, provision
 from anchor.dds.runtime import Counters, offer_latest
-from anchor.resources import bootstrap
 from fake_cse import MemoryCSE
 
 
@@ -90,11 +89,9 @@ def test_actual_native_qos_and_cdr_without_ros_or_network():
 
 
 def test_ipe_bootstrap_and_acp_do_not_grant_control_permissions():
-    from test_access_control import permission
+    from dds_permissions import permission
     endpoint=Endpoint('https://edge','cse-edge','/id-edge')
-    cfg=Settings('edge',{'edge':endpoint},dds_ipe_enabled=True)
     server=MemoryCSE(endpoint)
-    bootstrap(cfg,server.client('CAnchorEdge'))
     provision(server.client())
     assert permission(server,'ddsIpe/vibration',ORIGIN,1,4)
     assert not permission(server,'ddsIpe/vibration',ORIGIN,1,23)
@@ -102,8 +99,7 @@ def test_ipe_bootstrap_and_acp_do_not_grant_control_permissions():
     assert not permission(server,'ddsIpe/vibration',ORIGIN,8)
     assert permission(server,'ddsIpe/vibration','CAnchorDashboard',2)
     assert not permission(server,'ddsIpe/vibration','CAnchorDashboard',1,4)
-    assert not permission(server,'anchor/commands',ORIGIN,1,4)
-    assert not permission(server,'anchor/events',ORIGIN,1,4)
+    assert not any('/anchor/' in path for path in server.rows)
     assert not permission(server,'ddsIpe/vibration',ORIGIN,4,self_permission=True)
 
 

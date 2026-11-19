@@ -1,4 +1,4 @@
-# Linux coastal host. This packages an app and CSE; it is not a MEC platform installation.
+# Linux coastal host. This packages the CSE and optional DDS IPE; it is not a MEC platform installation.
 services:
   edge-cse:
     user: "${ANCHOR_UID:-1000}:${ANCHOR_GID:-1000}"
@@ -15,20 +15,8 @@ services:
     volumes:
       - edge-cse-data:/var/lib/acme
       - ./cse.ini:/etc/anchor/edge.ini:ro
+      - ./host.container.json:/config/host.container.json:ro
       - ../../.runtime-edge/tls:/secrets/tls:ro
-  edge-app:
-    user: "${ANCHOR_UID:-1000}:${ANCHOR_GID:-1000}"
-    build:
-      context: ../..
-      dockerfile: deploy/edge/Dockerfile.app
-    network_mode: host
-    restart: unless-stopped
-    depends_on:
-      - edge-cse
-    volumes:
-      - ./core.container.json:/config/edge.json:ro
-      - ../../.runtime-edge:/secrets:ro
-    command: ["--config", "/config/edge.json", "serve"]
   edge-dds-ipe:
     profiles: ["dds"]
     user: "${ANCHOR_UID:-1000}:${ANCHOR_GID:-1000}"
@@ -41,7 +29,7 @@ services:
       - edge-cse
     volumes:
       - ./dds.container.json:/config/dds.container.json:ro
-      - ./core.container.json:/config/core.container.json:ro
+      - ./host.container.json:/config/host.container.json:ro
       - ../../.runtime-edge/tls:/secrets/tls:ro
 volumes:
   edge-cse-data:

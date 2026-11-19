@@ -1,0 +1,29 @@
+{
+  "vessel_id": "ship-001",
+  "origin": "CAnchorShip",
+  "bind": "127.0.0.1",
+  "port": 8790,
+  "notify_url": "https://127.0.0.1:8790/notify",
+  "tls_cert": "../../.runtime-ship/tls/server.crt",
+  "tls_key": "../../.runtime-ship/tls/server.key",
+  "queue": "../../.runtime-ship/relay-queue.db",
+  "status_token_files": ["../../.runtime-ship/status-token"],
+  "nodes": {
+    "ship": {
+      "url": "https://127.0.0.1:8080",
+      "root": "cse-ship",
+      "csi": "/id-ship",
+      "rvi": "3",
+      "timeout": 5,
+      "ca": "../../.runtime-ship/tls/ca.crt"
+    },
+    "shore": {
+      "url": "https://shore.local:8080",
+      "root": "cse-in",
+      "csi": "/id-in",
+      "rvi": "3",
+      "timeout": 15,
+      "ca": "../../.runtime-ship/tls/ca.crt"
+    }
+  }
+}

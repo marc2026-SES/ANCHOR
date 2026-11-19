@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -36,24 +36,11 @@ class Settings:
     role: str
     nodes: dict[str, Endpoint]
     vessel_id: str = "ship-001"
-    bind: str = "127.0.0.1"
-    port: int = 8790
-    notify_url: str = "https://127.0.0.1:8790/notify"
-    token_file: str = ""
-    status_token_file: str = ""
     tls_cert: str = ""
     tls_key: str = ""
     tls_ca: str = ""
-    scan_seconds: float = 2
-    max_records: int = 100000
-    max_bytes: int = 256000000
-    batch_size: int = 40
-    critical_burst: int = 4
-    direct_shore: bool = False
-    dashboard_edge_read: bool = False
     dds_ipe_enabled: bool = False
-    tilt: dict = field(default_factory=lambda: {"trigger": 25, "recover": 15, "holdSeconds": 2,
-                                                "recoverSeconds": 2, "maxGapSeconds": 4})
+    dashboard_edge_read: bool = False
 
     def __post_init__(self):
         if self.role not in ROLES or self.role not in self.nodes:
@@ -64,21 +51,13 @@ class Settings:
             raise ValueError('dashboard_edge_read must be a boolean')
         if type(self.dds_ipe_enabled) is not bool or (self.dds_ipe_enabled and self.role != 'edge'):
             raise ValueError('dds_ipe_enabled is a boolean for the edge role only')
-        if not 0.2 <= self.scan_seconds <= 60 or min(self.max_records, self.max_bytes, self.batch_size, self.critical_burst) <= 0:
-            raise ValueError("Invalid scan interval or storage/batch limit")
-        if self.batch_size <= self.critical_burst:
-            raise ValueError("batch_size must leave a slot for ordinary traffic")
-        if not 0 <= self.tilt['recover'] < self.tilt['trigger'] <= 180:
-            raise ValueError("Tilt recovery threshold must be below trigger")
-        if min(self.tilt[k] for k in ('holdSeconds', 'recoverSeconds', 'maxGapSeconds')) <= 0:
-            raise ValueError("Tilt timing must be positive")
 
     @classmethod
     def load(cls, filename):
         path = Path(filename).resolve()
         data = json.loads(path.read_text())
         data['nodes'] = {k: Endpoint(**v) for k, v in data['nodes'].items()}
-        for field_name in ('token_file', 'status_token_file', 'tls_cert', 'tls_key', 'tls_ca'):
+        for field_name in ('tls_cert', 'tls_key', 'tls_ca'):
             if data.get(field_name) and not Path(data[field_name]).is_absolute():
                 data[field_name] = str((path.parent / data[field_name]).resolve())
         for endpoint in data['nodes'].values():
@@ -86,7 +65,6 @@ class Settings:
                 object.__setattr__(endpoint, 'ca', str(path.parent / endpoint.ca))
         settings = cls(**data)
         from .tls import require_https
-        require_https(settings.notify_url)
         for endpoint in settings.nodes.values():
             require_https(endpoint.url)
         if not all((settings.tls_cert, settings.tls_key, settings.tls_ca)):

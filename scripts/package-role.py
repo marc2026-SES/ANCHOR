@@ -17,7 +17,7 @@ def package(role, destination):
     included = ['README.md', 'pyproject.toml', 'constraints-tested.txt', '.gitignore', '.dockerignore',
                 'src', 'scripts', f'deploy/{role}', 'deploy/systemd']
     if role == 'ship':
-        included += ['hardware/ship-gateway-pi5/dashboard', 'hardware/firmware']
+        included += ['hardware/ship-gateway-pi5/dashboard', 'hardware/ship-gateway-pi5/sync', 'hardware/firmware']
     elif role == 'shore':
         included += ['hardware/shore-server-pi4/shore-dashboard']
     with open(destination, 'xb') as output, tarfile.open(fileobj=output, mode='w:gz') as archive:
@@ -29,13 +29,7 @@ def package(role, destination):
                     continue
                 if any(fnmatch.fnmatch(source.name, pattern) for pattern in EXCLUDE):
                     continue
-                if rel == Path('pyproject.toml'):
-                    data = source.read_text().replace('anchor-lab = "anchor.lab.entrypoint:main"\n', '').encode()
-                    info = archive.gettarinfo(source, arcname=str(rel))
-                    info.size = len(data)
-                    archive.addfile(info, io.BytesIO(data))
-                else:
-                    archive.add(source, arcname=str(rel), recursive=False)
+                archive.add(source, arcname=str(rel), recursive=False)
         identity = (role + '\n').encode()
         info = tarfile.TarInfo('.anchor-role')
         info.size, info.mode = len(identity), 0o644

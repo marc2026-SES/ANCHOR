@@ -1,0 +1,17 @@
+[Unit]
+Description=ANCHOR ship-to-shore relay (notification in, one create out, SQLite store-and-forward)
+After=network-online.target time-sync.target anchor-cse@ship.service
+Wants=network-online.target
+ConditionPathExists=/opt/anchor/deploy/ship/relay.json
+
+[Service]
+User=pi
+WorkingDirectory=/opt/anchor
+ExecStart=/opt/anchor/.venv/bin/python hardware/ship-gateway-pi5/sync/anchor_relay.py --config deploy/ship/relay.json
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
