@@ -8,7 +8,9 @@ import { Tabs, type TabId } from './components/Tabs'
 import { AiAlerts, AiTab } from './components/AiTab'
 import { DeliveryDonut } from './components/DeliveryDonut'
 import { TopologyMap } from './components/TopologyMap'
-import { ShipMotion } from './components/ShipMotion'
+import { ShipHull3D } from './components/ShipHull3D'
+import { CamCard } from './components/CamCard'
+import { LinkBanner } from './components/LinkBanner'
 import { demoAi, demoFleet } from './mock/ai'
 import { ContinuityTimeline } from './components/ContinuityTimeline'
 import { ZoneChart, type Marker, type SeriesSpec } from './components/ZoneChart'
@@ -143,6 +145,7 @@ export default function App() {
   return (
     <div className="page">
       {/* always visible, whatever the tab */}
+      <div className="deck">
       <div className="console">
         <StatusBar runId={run.runId} link={link} inferred={linkInferred(run, now, following)} now={now} lastAtShore={metrics.lastAtShore}
           heldOnShip={held ? held.ship : metrics.heldOnShip} waitingAtCoast={held ? held.coast : metrics.waitingAtCoast}
@@ -156,10 +159,19 @@ export default function App() {
       </div>
       <AiAlerts ai={ai} now={now} onOpen={() => setTab('ai')} />
       <Tabs active={tab} onChange={setTab} />
+      </div>
 
       {tab === 'overview' && (
         <div className="tab-body overview-hud">
           <TopologyMap link={link} inferred={linkInferred(run, now, following)} m={metrics} held={held ?? undefined} />
+          {LIVE && (
+            <section className="panel map-embed">
+              <header className="panel-head"><h3>Fleet map</h3>
+                <span>the coastal MEC map server, relayed by the Shore Monitor</span></header>
+              <iframe src="/map/" title="fleet map" />
+            </section>
+          )}
+          <LinkBanner events={run.events} now={now} m={metrics} mode={run.mode} />
           <div className="ov-row">
             <ContinuityTimeline events={run.events} links={run.links} start={start} end={end} now={now} height={470} mode={run.mode} />
             <div className="side">
@@ -173,7 +185,8 @@ export default function App() {
 
       {tab === 'sensors' && (
         <div className="tab-body zones">
-          <ShipMotion events={run.events} now={now} height={178} />
+          <ShipHull3D events={run.events} now={now} height={310} />
+          <CamCard linkUp={link.A === 'up'} live={LIVE} height={310} />
           {NODES.map(nd => (
             <ZoneChart key={nd.device} title={nd.title} subtitle={nd.subtitle} series={nd.series}
               records={atShore.filter(e => e.deviceId === nd.device)} links={run.links}

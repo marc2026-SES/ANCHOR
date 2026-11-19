@@ -66,7 +66,7 @@ DEFAULTS = {
     'core_seconds': 2,
     # A link counts as down when arrivals stop for longer than this while data was waiting (see infer_outages).
     'infer_gap_seconds': 10,
-    'full_scan_seconds': 60,
+    'full_scan_seconds': 900,
     'db': 'shore-monitor.db',
     'run': {'id': 'live', 'mode': 'anchor', 'history_minutes': 60},
     # The core copies bridge/position into anchor/events, so lat/lon reach the shore journal even though
@@ -81,6 +81,11 @@ DEFAULTS = {
     'ai': {'enabled': True, 'ae': 'anchorAI', 'sources': ['shore', 'ship'], 'scan_seconds': 5, 'stale_seconds': 90},
     # The coastal MEC fleet AI (<edge root>/fleetAI/fleetStatus, conflicts), read as CAnchorDashboard. Needs edge.url.
     'fleet': {'enabled': True, 'ae': 'fleetAI', 'scan_seconds': 10, 'stale_seconds': 90},
+    # Deck camera: the ship dashboard's MJPEG stream (Pi 5, /stream.mjpg), re-served here as /cam.mjpg so the
+    # page stays on one origin (no CORS, no second certificate to trust). url empty = no camera.
+    'camera': {'url': '', 'timeout': 5},
+    # The coastal MEC map server, re-served under /map/ so the dashboard (https) can embed it. url empty = off.
+    'map': {'url': '', 'timeout': 5},
 }
 
 POSITION_FIELDS = ('lat', 'lon')
@@ -129,7 +134,13 @@ def load_config(filename):
         tls[key] = local(tls[key])
         if tls[key] and not Path(tls[key]).is_file():
             raise SystemExit(f'tls.{key}: file not found: {tls[key]}')
-    urls = [cfg[s]['url'] for s in ('shore', 'edge', 'ship')] + [c['url'] for c in cfg['cores'].values()]
+    cam = cfg['camera']['url']
+    if cam and urlparse(cam).scheme not in ('http', 'https'):
+        raise SystemExit('camera.url must start with http:// or https://')
+    cfg['camera']['ca'] = tls['ca']
+    if cfg['map']['url'] and urlparse(cfg['map']['url']).scheme not in ('http', 'https'):
+        raise SystemExit('map.url must start with http:// or https://')
+    urls = [cfg[s]['url'] for s in ('shore', 'edge', 'ship')] + [c['url'] for c in cfg['cores'].values()] + [cam]
     if any(u.startswith('https://') for u in urls) and not tls['ca']:
         raise SystemExit('https addresses need tls.ca: the CA certificate (ca.crt) the team issued. '
                          'Certificate verification is never switched off.')
@@ -274,9 +285,13 @@ class CSE:
     def update(self, target, body):
         return self.request('PUT', target, body)
 
-    def discover(self, target, **filters):
-        """Discovery with paging. ACME can repeat the final page, so stop on a page with nothing new."""
-        refs, seen, offset = [], set(), 1
+    def discover(self, target, start=1, enough=None, **filters):
+        """Discovery with paging from child position `start`. Stops on a page with nothing new.
+
+        ACME answers an offset past the end of the list with the complete, unpaged list and checks the
+        ACP of every record for it (13 s for 2000 records on the Pi 4). A caller that knows how many
+        records it needs passes `enough(refs)` so that last probing request is never sent."""
+        refs, seen, offset = [], set(), start
         while offset <= 1_000_000:
             page = self.get(target, {'fu': 1, 'lvl': 1, 'lim': 100, 'ofst': offset, **filters})
             fresh = [r for r in page.get('m2m:uril', []) if r not in seen]
@@ -284,6 +299,8 @@ class CSE:
                 return refs
             refs.extend(fresh)
             seen.update(fresh)
+            if enough is not None and enough(refs):
+                return refs
             offset += 100
         raise RuntimeError(f'Discovery did not converge: {target}')
 
@@ -477,13 +494,18 @@ class Source:
 
 
 class JournalReader:
-    """Incremental reader of <root>/anchor/<name>: discovery with createdAfter, then a full pass now and then."""
+    """Incremental reader of <root>/anchor/<name>: reads the tail of the child list (children are listed in
+    creation order) up to the container's cni, then a full pass now and then. createdAfter is not used:
+    ACME applies lim before the filter, so a paged cra query only ever looks at the oldest 100 records."""
+
+    OVERLAP = 8  # child positions re-read before the tail (the list also holds a few non-CIN children)
 
     def __init__(self, cse, name, site, store, table, full_every, redact=True):
         self.cse, self.name, self.site, self.store, self.table = cse, name, site, store, table
         self.redact = redact
         self.known, self.high = store.known(table, site)
         self.full_every, self.last_full = full_every, 0.0
+        self.listed = set()  # refs seen in the CSE's current child list (not persisted)
         self.source = Source(f'{site} anchor/{name}')
         self.rejected = []
         self.arrivals = collections.deque(maxlen=5000)  # local ms when a record first showed up at this site
@@ -494,12 +516,20 @@ class JournalReader:
 
     def scan(self):
         try:
-            full = self.high is None or time.monotonic() - self.last_full >= self.full_every
-            filters = {'ty': 4, 'drt': 2}
-            if not full:
-                filters['cra'] = ms_ct(self.high - 10_000)  # overlap; already-known records are skipped
+            count = resource(self.cse.get(self.path)).get('cni', 0)
+            listed = self.listed
+            # A count below what was listed means records were removed (or the CSE was reset).
+            full = count < len(listed) or time.monotonic() - self.last_full >= self.full_every
+            if full:
+                refs = self.cse.discover(self.path, enough=lambda found: len(found) >= count, ty=4, drt=2) if count else []
+                listed = set(refs)
+            else:
+                missing = count - len(listed)
+                refs = self.cse.discover(self.path, start=max(1, len(listed) - self.OVERLAP), ty=4, drt=2,
+                                         enough=lambda found: sum(r not in listed for r in found) >= missing) if missing else []
+                listed = listed | set(refs)
             added = 0
-            for ref in self.cse.discover(self.path, **filters):
+            for ref in refs:
                 if ref in self.known:
                     continue
                 cin = resource(self.cse.get(ref))
@@ -526,6 +556,7 @@ class JournalReader:
                     self.rejected = (self.rejected + [{'ri': cin.get('ri'), 'error': str(exc)[:200]}])[-20:]
                 self.known.add(ref)
                 self.high = at if self.high is None else max(self.high, at)
+            self.listed = listed
             if full:
                 self.last_full = time.monotonic()
             self.source.success(added)
@@ -1211,7 +1242,7 @@ def notify_handler(monitor):
 
 # ── HTTP: dashboard API ──────────────────────────────────────────────────────
 
-def api_handler(monitor, token, dashboard_dir='', open_api=False):
+def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, map_cfg=None):
     class Api(BaseHTTPRequestHandler):
         server_version = 'anchor-shore-monitor'
 
@@ -1221,7 +1252,8 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False):
         def end_headers(self):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('X-Frame-Options', 'DENY')
+            if not getattr(self, 'framable', False):  # the relayed map is embedded by the dashboard itself
+                self.send_header('X-Frame-Options', 'SAMEORIGIN' if map_cfg and map_cfg.get('url') else 'DENY')
             super().end_headers()
 
         def reply(self, code, value):
@@ -1266,8 +1298,69 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False):
             self.end_headers()
             self.wfile.write(data)
 
+        def cam(self):
+            """Relay the ship dashboard's MJPEG stream (one upstream connection per viewer). The upstream
+            certificate is verified with the team CA; the stream is never stored."""
+            if not (camera and camera.get('url')):
+                return self.reply(404, {'error': 'no camera configured'})
+            try:
+                ctx = ssl.create_default_context(cafile=camera.get('ca') or None) \
+                    if camera['url'].startswith('https://') else None
+                up = urllib.request.urlopen(camera['url'], context=ctx, timeout=camera.get('timeout', 5))
+            except Exception as exc:
+                return self.reply(503, {'error': f'camera unavailable: {describe(exc)}'})
+            self.send_response(200)
+            self.send_header('Content-Type', up.headers.get('Content-Type') or 'multipart/x-mixed-replace')
+            self.send_header('Cache-Control', 'no-cache, private')
+            self.end_headers()
+            try:
+                while chunk := up.read(16384):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                up.close()
+
+        def relay_map(self, url):
+            """Pass one GET through to the MEC map server; the page lives under /map/ so its
+            relative assets resolve back through this same route."""
+            if not (map_cfg and map_cfg.get('url')):
+                return self.reply(404, {'error': 'no map configured'})
+            upstream = map_cfg['url'].rstrip('/') + url.path[len('/map'):]
+            if url.query:
+                upstream += '?' + url.query
+            try:
+                up = urllib.request.urlopen(upstream, timeout=map_cfg.get('timeout', 5))
+            except Exception as exc:
+                return self.reply(502, {'error': f'map unreachable: {describe(exc)}'})
+            self.framable = True
+            self.send_response(200)
+            self.send_header('Content-Type', up.headers.get('Content-Type') or 'application/octet-stream')
+            self.send_header('Cache-Control', 'no-cache, private')
+            self.end_headers()
+            try:
+                while chunk := up.read(65536):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                up.close()
+
         def do_GET(self):
             url = urlparse(self.path)
+            if url.path == '/map':
+                self.send_response(302)
+                self.send_header('Location', '/map/')
+                self.send_header('Content-Length', '0')
+                return self.end_headers()
+            if url.path.startswith('/map/'):
+                if not self.allowed():
+                    return self.reply(401, {'error': 'unauthorized'})
+                return self.relay_map(url)
+            if url.path == '/cam.mjpg':
+                if not self.allowed():
+                    return self.reply(401, {'error': 'unauthorized'})
+                return self.cam()
             if not url.path.startswith('/api/'):
                 if Path(dashboard_dir).is_dir():
                     return self.static(url)
@@ -1386,10 +1479,10 @@ def serve(cfg):
     api_address = (cfg['api']['bind'], cfg['api']['port'])
     if cfg['api']['bind'] in ('127.0.0.1', 'localhost', '::1'):
         api = ThreadingHTTPServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
-                                               cfg['api'].get('open', False)))  # loopback
+                                               cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map']))  # loopback
     else:
         api = TLSServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
-                                     cfg['api'].get('open', False)),
+                                     cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map']),
                         server_context(tls['cert'], tls['key']))
     servers = [api]
     if cfg['notify']['url']:

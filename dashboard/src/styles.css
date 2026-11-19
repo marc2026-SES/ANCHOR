@@ -649,3 +649,127 @@ table.acp .grant .who { color: #c9dcea; }
   clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
   padding: 5px 16px; margin: 2px 0 8px; }
 .more-btn:hover { background: rgba(95, 195, 239, 0.16); }
+
+/* ── the whole command deck sticks: header, alerts and the tab strip ─────── */
+.deck { position: sticky; top: 0; z-index: 60;
+  background: rgba(5, 13, 20, 0.94); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  padding-bottom: 6px; box-shadow: 0 12px 26px rgba(3, 9, 14, 0.55); }
+.console { position: static; backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+/* ── 3D hull + deck camera (Sensors tab, side by side) ───────────────────── */
+.hull-stage { position: relative; overflow: hidden; border-radius: 4px;
+  background: radial-gradient(130% 100% at 50% 0%, #0d2537 0%, #081a2b 60%, #071726 100%); }
+.hull-stage canvas { width: 100%; height: 100%; display: block; }
+.hull-stage.stale canvas { opacity: 0.55; }
+.hull-stage.warn { box-shadow: inset 0 0 0 1px rgba(189, 140, 55, 0.7); }
+.hull-stage.bad { box-shadow: inset 0 0 0 1px rgba(217, 96, 79, 0.85); }
+.cam-stage { position: relative; overflow: hidden; border-radius: 4px; background: #04121d;
+  display: flex; align-items: center; justify-content: center; }
+.cam-stage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-empty { display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center;
+  color: var(--muted); padding: 12px; }
+.cam-empty b { color: #c9dcea; font-size: 14px; }
+.cam-empty small { font-size: 12px; }
+
+/* ── link banner: the cut and the recovery, impossible to miss ───────────── */
+.link-banner { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 2px 16px;
+  align-items: center; margin: 8px 0 2px; padding: 8px 14px 9px; position: relative;
+  background: rgba(8, 24, 38, 0.9); border: 1px solid var(--line);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); }
+.link-banner .lb-text { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.link-banner .lb-text b { font-size: 15px; letter-spacing: 0.01em; white-space: nowrap; }
+.link-banner .lb-text small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-banner .lb-num { font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.link-banner .lb-strip { grid-column: 1 / -1; position: relative; height: 18px; }
+.link-banner .lb-strip canvas { width: 100%; height: 100%; display: block; }
+.link-banner .lb-t0, .link-banner .lb-t1 { position: absolute; top: 100%; font-size: 9px; color: var(--muted); line-height: 1.6; }
+.link-banner .lb-t1 { right: 0; }
+.link-banner { padding-bottom: 20px; }
+.link-banner.online b, .link-banner.online .lb-num { color: #5fd6a2; }
+.link-banner.online { border-color: rgba(47, 174, 118, 0.35); }
+.link-banner.outage b, .link-banner.outage .lb-num { color: #f0998c; }
+.link-banner.outage { border-color: rgba(217, 96, 79, 0.6); background: rgba(44, 16, 14, 0.75); }
+.link-banner.outage .lb-num { animation: lb-pulse 1.6s ease-in-out infinite; }
+.link-banner.catching_up b, .link-banner.catching_up .lb-num { color: #d9a9ea; }
+.link-banner.catching_up { border-color: rgba(178, 115, 200, 0.55); background: rgba(34, 20, 42, 0.72); }
+.link-banner.waiting b { color: var(--muted); }
+@keyframes lb-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .link-banner.outage .lb-num { animation: none; } }
+
+/* banner lives in the Overview flow now, not the sticky deck */
+.overview-hud .link-banner { margin: 0; }
+
+/* ── link banner readability pass ────────────────────────────────────────── */
+.link-banner { background: rgba(8, 24, 38, 0.92); border-color: var(--line); padding-left: 18px; }
+.link-banner::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--muted); }
+.link-banner .lb-text b { color: #e8f2f9; }
+.link-banner .lb-text small { color: #a9bcc9; }
+.link-banner .lb-num { font-size: 14px; }
+.link-banner.online, .link-banner.outage, .link-banner.catching_up { background: rgba(8, 24, 38, 0.92); }
+.link-banner.online { border-color: rgba(47, 174, 118, 0.3); }
+.link-banner.online::after { background: #2fae76; }
+.link-banner.online b { color: #e8f2f9; }
+.link-banner.outage { border-color: rgba(217, 96, 79, 0.45); }
+.link-banner.outage::after { background: #d9604f; }
+.link-banner.outage b { color: #e8f2f9; }
+.link-banner.catching_up { border-color: rgba(178, 115, 200, 0.45); }
+.link-banner.catching_up::after { background: #b273c8; }
+.link-banner.catching_up b { color: #e8f2f9; }
+.link-banner .lb-strip { height: 20px; }
+
+/* strip legend */
+.link-banner .lb-legend { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 5px 7px; font-size: 9px; color: var(--muted); line-height: 1.6; white-space: nowrap; }
+.link-banner .lb-legend i { width: 14px; height: 7px; display: inline-block; border-radius: 1px; }
+.link-banner .lb-legend i.arriving { background: rgba(47, 174, 118, 0.5); }
+.link-banner .lb-legend i.cut { background: repeating-linear-gradient(45deg, #9e4237 0 3px, #b35648 3px 5px); }
+.link-banner .lb-legend i.notback { background: repeating-linear-gradient(45deg, #44525b 0 3px, #55646e 3px 5px); }
+.link-banner .lb-legend i.rec { background: repeating-linear-gradient(45deg, #71537f 0 3px, #86659a 3px 5px); }
+
+/* ── link banner, take 3: an ordinary panel that speaks the chart's colors ── */
+.link-banner { display: block; clip-path: none; padding: 10px 12px 24px; margin: 0; border-color: var(--line); background: rgba(8, 24, 38, 0.88); }
+.link-banner::after { content: none; }
+.link-banner .panel-head .lb-num { margin-left: auto; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.link-banner.online .panel-head h3::before { background: #2fae76; }
+.link-banner.online .lb-num { color: #5fd6a2; }
+.link-banner.outage .panel-head h3::before { background: #d9604f; }
+.link-banner.outage .panel-head h3 { color: #f0998c; }
+.link-banner.outage .lb-num { color: #f0998c; animation: lb-pulse 1.6s ease-in-out infinite; }
+.link-banner.catching_up .panel-head h3::before { background: #b273c8; }
+.link-banner.catching_up .lb-num { color: #d9a9ea; }
+.link-banner .lb-strip { height: 16px; margin-top: 2px; }
+.link-banner .lb-legend i.cut { background: #c0564a; }
+.link-banner .lb-legend i.notback { background: #2b3640; }
+.link-banner .lb-legend i.rec { background: repeating-linear-gradient(45deg, rgba(178,115,200,0.5) 0 3px, rgba(200,150,220,0.65) 3px 5px); }
+.link-banner .lb-legend i.arriving { background: rgba(47, 174, 118, 0.4); }
+
+/* past cuts share the red family: missing data is red, repaid data is purple */
+.link-banner .lb-legend i.notback { background: rgba(217, 96, 79, 0.3); }
+
+/* legend sits under the header, left-aligned — same spot as the chart legends below */
+.link-banner .lb-legend { position: static; transform: none; display: flex; align-items: center;
+  gap: 4px 8px; font-size: 10.5px; color: var(--muted); margin: 2px 0 7px; }
+.link-banner .lb-legend i { margin-right: -3px; }
+
+/* cuts hatched, recovery solid */
+.link-banner .lb-legend i.cut { background: repeating-linear-gradient(45deg, #c0564a 0 3px, #d06f61 3px 5px); }
+.link-banner .lb-legend i.notback { background: repeating-linear-gradient(45deg, rgba(217,96,79,0.3) 0 3px, rgba(217,96,79,0.45) 3px 5px); }
+.link-banner .lb-legend i.rec { background: #8a639c; }
+
+/* 3D hull data-source chip */
+.hull-src { position: absolute; top: 10px; right: 12px; font-size: 10px; font-weight: 650;
+  letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 9px; border-radius: 3px; }
+.hull-src.live { color: #5fd6a2; background: rgba(47, 174, 118, 0.14); }
+.hull-src.cse { color: #e8b865; background: rgba(189, 140, 55, 0.14); }
+.hull-src.off { color: #f0998c; background: rgba(217, 96, 79, 0.14); }
+
+/* fleet map embed */
+.map-embed iframe { width: 100%; height: 480px; border: 0; display: block; border-radius: 4px; background: #04121d; }
+
+/* overview: network and fleet map side by side, the arrival banner under the pair */
+.ov-top2 { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.ov-top2 .tp { display: flex; flex-direction: column; }
+.ov-top2 .tp svg { flex: 1; min-height: 230px; }
+.ov-top2 .map-embed { display: flex; flex-direction: column; }
+.ov-top2 .map-embed iframe { flex: 1; height: auto; min-height: 320px; }
+@media (max-width: 1100px) { .ov-top2 { grid-template-columns: 1fr; } }

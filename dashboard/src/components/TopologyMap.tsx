@@ -63,19 +63,6 @@ export function TopologyMap({ link, inferred, m, held }: {
       <header className="panel-head"><h3>Network</h3>
         <span>three sensor nodes → ship → coast → shore, counts sit where the data sits, pulses mean records flowing</span></header>
       <svg viewBox="0 0 1180 238" className="tp-svg" role="img" aria-label="network diagram">
-        {/* ghost blueprint of the vessel behind the diagram */}
-        <g className="tp-ghost" aria-hidden="true">
-          <path d="M 150 196 Q 400 214 700 206 Q 950 198 1046 150 L 1010 124 L 190 124 Q 160 160 150 196 Z" />
-          <path d="M 300 124 L 300 84 L 560 84 L 560 124" />
-          <path d="M 560 124 L 560 56 L 680 56 L 680 124" />
-          <path d="M 580 56 H 660 M 580 70 H 660" className="tp-ghost-fine" />
-          <path d="M 320 100 H 540" className="tp-ghost-fine" />
-          <path d="M 730 124 L 730 30 M 718 44 H 742" />
-          <path d="M 860 124 L 900 92 L 940 124" className="tp-ghost-fine" />
-          <circle cx="260" cy="156" r="7" /><circle cx="360" cy="162" r="7" /><circle cx="460" cy="166" r="7" />
-          <circle cx="560" cy="168" r="7" /><circle cx="660" cy="168" r="7" /><circle cx="760" cy="166" r="7" />
-          <path d="M 60 185 H 1120" className="tp-ghost-water" />
-        </g>
         {/* sensors → ship */}
         <Sensor x={92} y={LY - 58} title="BRIDGE S3" sub="attitude, GPS" />
         <Sensor x={92} y={LY} title="ENGINE WROOM" sub="vibration, MQ-2" />

@@ -63,18 +63,19 @@ export function Playback(props: {
   const { start, end, now, playing, speed, onSeek, onPlay, onSpeed, live } = props
   return (
     <div className="playback">
-      {live ? (
+      {live && (
         <button className={`play ${live.following ? 'following' : ''}`} onClick={live.onFollow} disabled={live.following}>
           {live.following ? 'Following' : 'Back to live'}
         </button>
-      ) : (
+      )}
+      {(!live || !live.following) && (
         <button className="play" onClick={() => { if (!playing && now >= end) onSeek(start); onPlay(!playing) }}>
           {playing ? 'Pause' : 'Play'}
         </button>
       )}
       <input type="range" min={start} max={end} step={1000} value={Math.min(now, end)} onChange={e => onSeek(Number(e.target.value))}
         aria-label="Playback position" />
-      {!live && (
+      {(!live || !live.following) && (
         <select value={speed} onChange={e => onSpeed(Number(e.target.value))} aria-label="Playback speed">
           {[1, 10, 30, 60].map(s => <option key={s} value={s}>{s}×</option>)}
         </select>

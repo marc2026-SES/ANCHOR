@@ -205,10 +205,14 @@ const fleetFacts = (v: Record<string, unknown>, skip: string[] = []) =>
     !['eventId', 'seenAt', 'at', 'redacted', 'ts', ...skip].includes(k) &&
     (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'))
 
+const CONFLICT_FOLD = 3
+
 function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: boolean }) {
+  const [showAll, setShowAll] = useState(false)
   const st = FLEET_STATE[fleet.state] ?? FLEET_STATE.error
   const age = fleet.status?.seenAt ? now - fleet.status.seenAt : null
   const conflicts = fleet.conflicts.filter(c => c.at <= now)
+  const shown = showAll ? conflicts.slice(0, 40) : conflicts.slice(0, CONFLICT_FOLD)
   return (
     <section className="panel">
       <header className="panel-head"><h3>Fleet (coastal AI)</h3>
@@ -226,7 +230,7 @@ function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: 
         <table className="ai-table">
           <thead><tr><th>Time (UTC)</th><th>Conflict</th></tr></thead>
           <tbody>
-            {conflicts.slice(0, 8).map(c => (
+            {shown.map(c => (
               <tr key={c.eventId ?? c.at}>
                 <td>{clock(c.at)}<small>{fmtMs(now - c.at)} ago</small></td>
                 <td>{typeof c.level === 'string' && <span className={`pill ai-${c.level === 'critical' ? 'critical' : 'warn'}`}>{c.level}</span>}{' '}
@@ -237,6 +241,11 @@ function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: 
             ))}
           </tbody>
         </table>
+      )}
+      {conflicts.length > CONFLICT_FOLD && (
+        <button className="more-btn" onClick={() => setShowAll(v => !v)}>
+          {showAll ? `Show the latest ${CONFLICT_FOLD}` : `View all ${Math.min(conflicts.length, 40)}`}
+        </button>
       )}
       {fleet.state === 'ok' && conflicts.length === 0 && <p className="empty">No vessel conflict in this run.</p>}
     </section>
