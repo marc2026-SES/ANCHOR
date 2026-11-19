@@ -25,7 +25,9 @@ import base64
 import hashlib
 import io
 import json
+import shutil
 import tarfile
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -36,8 +38,8 @@ import numpy as np
 import yaml
 
 import features
-from features import (FFT_SENSORS, SRC_CONTAINERS, STRIDE_S, SUBSYSTEM_SENSORS,
-                      WINDOW_S, _stats, load_csv)
+from features import (FFT_SENSORS, SRC_CONTAINERS, SUBSYSTEM_SENSORS,
+                      _stats, load_csv)
 from link_forecast import LinkForecaster, event_id
 from model_iforest import TS_FMT, load_models, score_array
 from prognosis import TrendPrognoser
@@ -47,6 +49,9 @@ ROOT = Path(__file__).resolve().parent
 RESULTS = ROOT / "results"
 
 HATCH = ("CARGO", "hatch")
+POLL_TICK_S = 0.2               # latest 폴링 루프 간격
+POLL_GAP_RATIO = 0.7            # 센서 주기의 0.7배마다 la 조회 — 주기보다 빨라야 샘플을 안 놓침
+POLL_WARN_EVERY_S = 30.0        # 같은 컨테이너의 폴링 실패 경고 출력 간격
 SENSOR_KEYS: dict[tuple[str, str], list[tuple[str, int]]] = {}
 
 
@@ -61,11 +66,24 @@ def _build_sensor_keys() -> None:
 _build_sensor_keys()
 
 INFER_GUARD_S = 1.0  # 센서 간 도착 시차 허용 (데이터 시계 기준)
+ANOMALY_REPEAT_S = 5.0   # 같은 등급이 이어지는 동안 anomaly 기록 간격 — 1초 간격 추론이 CSE에 초당
+                         # 쓰기를 쏟지 않게 한다. 등급이 바뀌면 즉시 기록한다
 LEVEL_RANK = {"normal": 0, "warn": 1, "critical": 2}
 
 
 def iso(ep: float) -> str:
     return datetime.fromtimestamp(ep, tz=timezone.utc).strftime(TS_FMT)
+
+
+def window_mismatch(bundles: dict) -> str | None:
+    """모델이 지금 프로필과 다른 창·간격으로 학습됐으면 그 설명, 맞으면 None.
+    창이 다르면 특징 이름은 같아도 값의 분포가 달라 판정이 틀어진다."""
+    for sub, b in bundles.items():
+        got = (b.get("window_s"), b.get("stride_s"))
+        if got != (features.WINDOW_S, features.STRIDE_S):
+            return (f"{sub} 모델은 창 {got[0]}초·간격 {got[1]}초로 학습됨 "
+                    f"(지금 프로필은 {features.WINDOW_S}초·{features.STRIDE_S}초)")
+    return None
 
 
 def parse_ts(s: str) -> float:
@@ -154,8 +172,8 @@ class WindowPipeline:
         if self.first[sub] is None:
             return
         if self.next_end[sub] is None:
-            start0 = float(np.ceil(self.first[sub] / STRIDE_S) * STRIDE_S)
-            self.next_end[sub] = start0 + WINDOW_S
+            start0 = float(np.ceil(self.first[sub] / features.STRIDE_S) * features.STRIDE_S)
+            self.next_end[sub] = start0 + features.WINDOW_S
         while self.next_end[sub] + guard <= self.latest[sub] + 1e-9:
             end = self.next_end[sub]
             x = self._vector(sub, end)
@@ -168,25 +186,27 @@ class WindowPipeline:
                     "level": str(level[0]),
                     "score": round(float(s01[0]), 4),
                     "topFeatures": top[0],
-                    "windowStart": iso(end - WINDOW_S),
+                    "windowStart": iso(end - features.WINDOW_S),
                     "windowEnd": iso(end),
                     "srcContainers": SRC_CONTAINERS[sub],
                 })
             else:
                 self.skipped[sub] += 1
-            self.next_end[sub] = end + STRIDE_S
-            self._prune(sub, self.next_end[sub] - WINDOW_S)
+            self.next_end[sub] = end + features.STRIDE_S
+            self._prune(sub, self.next_end[sub] - features.WINDOW_S)
 
     def _vector(self, sub: str, end: float) -> np.ndarray | None:
         feats: dict[str, float] = {}
-        a = end - WINDOW_S
+        a = end - features.WINDOW_S
         for cont, key, step in SUBSYSTEM_SENSORS[sub]:
             samples = [(t, v) for t, v in self.buf.get((sub, cont, key), ())
                        if a - 1e-9 <= t < end - 1e-9]
-            need = WINDOW_S // step
+            need = features.WINDOW_S // step
             if len(samples) != need:
-                # 실센서(ship 프로필)는 주기가 흔들림 — 충분히 찼으면 격자 보간으로 맞춘다
-                if not features.TOLERANT_WINDOWS or len(samples) < max(4, int(0.7 * need)):
+                # 실센서(ship 프로필)는 주기가 흔들림 — 충분히 찼으면 격자 보간으로 맞춘다.
+                # 느린 센서는 창에 2개뿐일 수 있어(10초 창·5초 주기) 최소 개수를 need로 제한한다.
+                if not features.TOLERANT_WINDOWS \
+                        or len(samples) < max(min(4, need), int(0.7 * need)):
                     return None                         # 윈도우 미완성
                 samples.sort()
                 st = np.array([t for t, _ in samples])
@@ -305,6 +325,7 @@ class LiveApp:
                                    self.o["ae"]["originator"], rvi=str(self.o.get("rvi", "4")),
                                    ca=self.o.get("ca_cert", True))
         self.skip_normal = bool(self.o["anomaly"].get("skip_normal", True))
+        self._published: dict[str, tuple[str, float]] = {}      # 서브시스템 → (마지막 기록 등급, 시각)
         self.fcnt_key = self.o["anomaly"].get("key", "anchor:anm")
         self.use_fcnt = True
         self.pending_subs: list[str] = []
@@ -344,21 +365,29 @@ class LiveApp:
         self.poll_enabled = bool(po.get("enabled"))
         self.poll_interval = float(po.get("interval_s", 5.0))
         self.poll_read_origin = po.get("read_originator")       # 센서 읽기 originator(임시 CAdmin 등)
+        self.poll_mode = po.get("mode", "latest")               # latest | discovery
         self._poll_seen: dict[str, set[str]] = {}
+        self._poll_last_ct: dict[str, str] = {}
+        self._poll_due: dict[str, float] = {}
+        self._poll_warned: dict[str, float] = {}
         stc = self.o.get("status") or {}                        # 대시보드용 상태 하트비트
         self.status_rn = stc.get("rn")
         self.status_period = float(stc.get("period_s", 30))
         self.status_path = f"{self.ae_path}/{self.status_rn}" if self.status_rn else None
 
         self.readers = [str(r) for r in (self.o.get("readers") or [])]  # 조회자(acop 34)
-        mir = self.o.get("mirror") or {}                        # 결과 이중 기록 (육상 등)
-        self.mirror_client = (OneM2MClient(mir["cse_url"], mir.get("cse_rn", "cse-in"),
-                                           self.o["ae"]["originator"],
-                                           rvi=str(mir.get("rvi", self.o.get("rvi", "3"))),
-                                           ca=mir.get("ca_cert", True))
-                              if mir.get("cse_url") else None)
-        self.mirror_ready = False
+        mir = self.o.get("mirror") or []                        # 결과 이중 기록 (다중 대상 가능)
+        mir_list = mir if isinstance(mir, list) else ([mir] if mir.get("cse_url") else [])
+        # 미러마다 originator를 따로 둘 수 있다 — 같은 originator가 CSE마다 다른 AE에 묶여 있을 때
+        # (선박 CSE의 CAnchorAgent는 센서 읽기용 agent AE, 육상 CSE에서는 anchorAI 소유자).
+        self.mirror_clients = [OneM2MClient(m["cse_url"], m.get("cse_rn", "cse-in"),
+                                            m.get("originator", self.o["ae"]["originator"]),
+                                            rvi=str(m.get("rvi", self.o.get("rvi", "3"))),
+                                            ca=m.get("ca_cert", True))
+                               for m in mir_list if m.get("cse_url")]
+        self.mirrors_ready: list[OneM2MClient] = []
         self._mirror_warn_at = 0.0
+        self._mirror_fail_logged: set[str] = set()
 
         mr = self.o.get("model_registry") or {}                 # 모델 배포 루프 (핫스왑)
         self.registry_poll_s = float(mr.get("poll_s", 30))
@@ -368,8 +397,11 @@ class LiveApp:
             self.registry_client = (OneM2MClient(mr["cse_url"], mr.get("cse_rn", "cse-in"),
                                                  self.o["ae"]["originator"],
                                                  rvi=str(mr.get("rvi", self.o.get("rvi", "3"))))
-                                    if mr.get("cse_url") else self.mirror_client)
+                                    if mr.get("cse_url")
+                                    else (self.mirror_clients[0] if self.mirror_clients
+                                          else None))
         self._registry_seen = None
+        self.registry_ready = False
         self.models_dir = str((cfg.get("paths") or {}).get("models_dir") or (ROOT / "models"))
         try:
             card = json.loads((Path(self.models_dir) if Path(self.models_dir).is_absolute()
@@ -423,19 +455,9 @@ class LiveApp:
             self.client.ensure_container(self.ae_path, self.status_rn, mni=100)
             print(f"aiStatus 컨테이너: 준비 ({self.status_rn})")
         self._apply_read_acp(self.client)
-        if self.mirror_client:
-            self._setup_mirror()
-        if self.registry_client:
-            try:
-                self.registry_client.ensure_container(self.o["ae"]["rn"], self.registry_rn,
-                                                      mni=20)
-                print(f"modelRegistry 감시: {self.registry_client.base} "
-                      f"({self.registry_rn}, {self.registry_poll_s:g}s 주기)")
-            except (OneM2MError, OSError) as e:
-                print(f"[warn] modelRegistry 준비 실패: {e} — 핫스왑 비활성")
-                self.registry_client = None
+        self._setup_remote()
         if self.poll_enabled:
-            print("폴링 수집 모드 — 센서 구독 생략 (읽기 전용 디스커버리)")
+            print("폴링 수집 모드 — 센서 구독 생략 (읽기 전용)")
         else:
             self.pending_subs = [p.strip("/") for p in self.o["sensors"]]
             self._try_subscriptions(verbose=True)
@@ -532,10 +554,56 @@ class LiveApp:
                                    ts.timestamp(), ts.strftime(TS_FMT))
         self.pipeline.add(subsystem, container, data, ts)
 
-    # ---- 폴링 수집 (구독 권한 없는 CSE용 — 읽기 전용 디스커버리 차집합) ----
+    # ---- 폴링 수집 (구독 권한 없는 CSE용, 읽기 전용) ----
+    # latest(기본): 컨테이너마다 최신 CIN(la) 1건을 센서 주기보다 조금 빠르게 읽고 ct로 중복을
+    #   거른다. 요청 비용이 누적 CIN 수와 무관하다. 드물게 놓친 샘플은 격자 보간이 메운다.
+    # discovery: CIN 경로 전체 디스커버리 차집합. 빠짐이 없지만 비용이 누적 CIN 수에 비례한다
+    #   (mni 없는 컨테이너에서 3천 건 ≈ 5초, CSE CPU 점유) — 오프라인 수집·소규모 CSE 전용.
+
+    def _poll_paths(self) -> list[str]:
+        paths = [p.strip("/") for p in self.o["sensors"]]
+        if not self.forecaster:                    # position은 링크 예측 전용 스트림
+            paths = [p for p in paths if p.rsplit("/", 1)[-1] != "position"]
+        return paths
+
+    def _poll_gap(self, container: str) -> float:
+        period = min((per for sens in SUBSYSTEM_SENSORS.values()
+                      for c, _key, per in sens if c == container), default=self.poll_interval)
+        return max(0.5, POLL_GAP_RATIO * period)
+
+    def _poll_warn(self, path: str, err: Exception) -> None:
+        now = time.monotonic()
+        if now - self._poll_warned.get(path, -1e9) >= POLL_WARN_EVERY_S:
+            self._poll_warned[path] = now
+            print(f"[warn] 폴링 실패 {path}: {err} — 계속 재시도")
+
+    @staticmethod
+    def _cin_sample(cin: dict) -> dict | None:
+        """CIN → 센서 샘플 dict (ts 보정 포함). con이 JSON이 아니면 None."""
+        try:
+            con = cin.get("con")
+            data = json.loads(con) if isinstance(con, str) else dict(con or {})
+        except ValueError:
+            return None
+        ct_s = ct_epoch(cin.get("ct"))
+        ts = data.get("ts")
+        if ct_s and isinstance(ts, (int, float)) and abs(ts / 1000.0 - ct_s) > 3600.0:
+            data["ts"] = ct_s * 1000.0             # 장치 NTP 미동기 — CSE 수신시각으로 보정
+        return data
 
     def _poll_seed(self) -> None:
-        """기존 CIN 경로를 '본 것'으로 표시 — 이후 새로 생기는 CIN만 처리."""
+        """기존 CIN은 건너뛰고 이후 새로 생기는 CIN만 처리하도록 기준점을 잡는다."""
+        if self.poll_mode == "latest":
+            for path in self._poll_paths():
+                try:
+                    cin = self.client.latest_cin(f"{self.o['cse_rn']}/{path}",
+                                                 originator=self.poll_read_origin)
+                    self._poll_last_ct[path] = (cin or {}).get("ct", "")
+                except (OneM2MError, OSError) as e:
+                    self._poll_last_ct[path] = ""
+                    print(f"[warn] 폴링 시드 실패 {path}: {e}")
+            print(f"폴링 시드 완료 — 컨테이너 {len(self._poll_last_ct)}개, 최신 CIN(la) 조회")
+            return
         for path in [p.strip("/") for p in self.o["sensors"]]:
             try:
                 self._poll_seen[path] = set(self.client.discover_cins(
@@ -547,6 +615,29 @@ class LiveApp:
 
     def _poll_once(self) -> int:
         batch: list[tuple[float, str, str, dict]] = []
+        if self.poll_mode == "latest":
+            now = time.monotonic()
+            for path in self._poll_paths():
+                if now < self._poll_due.get(path, 0.0):
+                    continue
+                subsystem, container = path.split("/")[-2].upper(), path.split("/")[-1]
+                self._poll_due[path] = now + self._poll_gap(container)
+                try:
+                    cin = self.client.latest_cin(f"{self.o['cse_rn']}/{path}",
+                                                 originator=self.poll_read_origin)
+                except (OneM2MError, OSError) as e:
+                    self._poll_warn(path, e)
+                    continue
+                ct = (cin or {}).get("ct", "")
+                if not ct or ct <= self._poll_last_ct.get(path, ""):
+                    continue
+                self._poll_last_ct[path] = ct
+                data = self._cin_sample(cin)
+                if data is not None:
+                    batch.append((ts_sort_key(data.get("ts")), subsystem, container, data))
+            for _, subsystem, container, data in sorted(batch, key=lambda b: b[0]):
+                self._ingest(subsystem, container, data)
+            return len(batch)
         for path in [p.strip("/") for p in self.o["sensors"]]:
             subsystem, container = path.split("/")[-2].upper(), path.split("/")[-1]
             try:
@@ -564,17 +655,9 @@ class LiveApp:
                 except (OneM2MError, OSError):
                     continue                       # seen 미추가 — 다음 라운드 재시도
                 seen.add(u)
-                cin = (res or {}).get("m2m:cin") or {}
-                try:
-                    con = cin.get("con")
-                    data = json.loads(con) if isinstance(con, str) else dict(con or {})
-                except ValueError:
+                data = self._cin_sample((res or {}).get("m2m:cin") or {})
+                if data is None:
                     continue
-                ct_s = ct_epoch(cin.get("ct"))
-                ts = data.get("ts")
-                if ct_s and isinstance(ts, (int, float)) \
-                        and abs(ts / 1000.0 - ct_s) > 3600.0:
-                    data["ts"] = ct_s * 1000.0     # 장치 NTP 미동기 — CSE 수신시각으로 보정
                 batch.append((ts_sort_key(data.get("ts")), subsystem, container, data))
         for _, subsystem, container, data in sorted(batch, key=lambda b: b[0]):
             self._ingest(subsystem, container, data)
@@ -596,7 +679,7 @@ class LiveApp:
         if not self.readers:
             return
         ae_rel = self.o["ae"]["rn"]
-        me = self.o["ae"]["originator"]
+        me = client.originator
         try:
             acp, _ = client.ensure_acp(ae_rel, "acpAnchorAI",
                                        grants=[([me], ACOP_ALL), (self.readers, 34)],
@@ -618,35 +701,58 @@ class LiveApp:
                 print(f"[warn] acpi 설정 실패 {rn}: {e}")
         print(f"조회 ACP 적용: {', '.join(self.readers)} (acop 34, {client.base})")
 
-    def _setup_mirror(self) -> None:
-        """육상 CSE에 같은 이름의 산출물 트리를 만들어 이중 기록을 준비."""
-        m = self.mirror_client
+    def _remote_pending(self) -> bool:
+        return len(self.mirrors_ready) < len(self.mirror_clients) \
+            or (self.registry_client is not None and not self.registry_ready)
+
+    def _setup_remote(self) -> None:
+        """미러·모델 레지스트리 준비. 아직 안 된 대상만 시도하므로 주기적으로 다시 불러도 된다
+        (부팅 직후 네트워크 미기동, 상대 CSE 재시작·초기화 뒤 자동 복구)."""
         ae_rel = self.o["ae"]["rn"]
-        try:
-            m.ensure_ae(ae_rel, self.o["ae"]["api"])
-            for rn, mni in self._result_containers():
-                m.ensure_container(ae_rel, rn, mni=mni)
-            self._apply_read_acp(m)
-            self.mirror_ready = True
-            print(f"미러 CSE 준비: {m.base}/{m.cse_rn} — 결과 이중 기록")
-        except (OneM2MError, OSError) as e:
-            print(f"[warn] 미러 CSE 준비 실패: {e} — 이중 기록 비활성")
+        for m in self.mirror_clients:
+            if m in self.mirrors_ready:
+                continue
+            try:
+                m.ensure_ae(ae_rel, self.o["ae"]["api"])
+                for rn, mni in self._result_containers():
+                    m.ensure_container(ae_rel, rn, mni=mni)
+                self._apply_read_acp(m)
+                self.mirrors_ready.append(m)
+                self._mirror_fail_logged.discard(m.base)
+                print(f"미러 CSE 준비: {m.base}/{m.cse_rn} — 결과 이중 기록")
+            except (OneM2MError, OSError) as e:
+                if m.base not in self._mirror_fail_logged:      # 같은 대상의 반복 실패는 1회만 기록
+                    self._mirror_fail_logged.add(m.base)
+                    print(f"[warn] 미러 준비 실패({m.base}): {e} — 주기적으로 재시도")
+        c = self.registry_client
+        if c is not None and not self.registry_ready:
+            try:
+                c.ensure_container(ae_rel, self.registry_rn, mni=20)
+                self.registry_ready = True
+                self._mirror_fail_logged.discard(f"registry:{c.base}")
+                print(f"modelRegistry 감시: {c.base} ({self.registry_rn}, "
+                      f"{self.registry_poll_s:g}s 주기)")
+            except (OneM2MError, OSError) as e:
+                if f"registry:{c.base}" not in self._mirror_fail_logged:
+                    self._mirror_fail_logged.add(f"registry:{c.base}")
+                    print(f"[warn] modelRegistry 준비 실패: {e} — 주기적으로 재시도")
 
     def _mirror_cin(self, rn: str, body, lbl: list | None = None) -> None:
-        if not self.mirror_ready:
-            return
-        try:
-            self.mirror_client.create_cin(f"{self.o['ae']['rn']}/{rn}", body, lbl=lbl)
-        except (OneM2MError, OSError) as e:
-            now = time.time()
-            if now - self._mirror_warn_at > 60:                 # 경고 스팸 방지
-                self._mirror_warn_at = now
-                print(f"[warn] 미러 기록 실패 {rn}: {e}")
+        for m in list(self.mirrors_ready):
+            try:
+                m.create_cin(f"{self.o['ae']['rn']}/{rn}", body, lbl=lbl)
+            except (OneM2MError, OSError) as e:
+                if isinstance(e, OneM2MError) and e.status == 404:
+                    self.mirrors_ready.remove(m)    # 미러 CSE가 초기화됨 — 재시도 때 다시 만든다
+                now = time.time()
+                if now - self._mirror_warn_at > 60:             # 경고 스팸 방지
+                    self._mirror_warn_at = now
+                    print(f"[warn] 미러 기록 실패 {m.base} {rn}: {e}")
 
     def _check_model_update(self) -> None:
         """레지스트리의 새 모델 CIN을 감지해 해시 검증 후 무중단 교체."""
         c = self.registry_client
-        if not c:
+        if not c or not self.registry_ready:
             return
         try:
             res = c.retrieve(f"{self.o['ae']['rn']}/{self.registry_rn}/la")
@@ -673,14 +779,24 @@ class LiveApp:
             if not mdir.is_absolute():
                 mdir = ROOT / mdir
             mdir.mkdir(parents=True, exist_ok=True)
-            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
-                for m in tf.getmembers():
-                    name = Path(m.name).name       # 경로 평탄화 — 디렉터리 탈출 차단
-                    if not m.isfile() or not (name.endswith(".joblib")
-                                              or name.endswith(".json")):
-                        continue
-                    (mdir / name).write_bytes(tf.extractfile(m).read())
-            bundles = load_models(str(mdir))
+            tmp = Path(tempfile.mkdtemp(prefix="model-incoming-", dir=str(mdir.parent)))
+            try:
+                with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
+                    for m in tf.getmembers():
+                        name = Path(m.name).name       # 경로 평탄화 — 디렉터리 탈출 차단
+                        if not m.isfile() or not (name.endswith(".joblib")
+                                                  or name.endswith(".json")):
+                            continue
+                        (tmp / name).write_bytes(tf.extractfile(m).read())
+                bundles = load_models(str(tmp))
+                wrong = window_mismatch(bundles)
+                if wrong:
+                    print(f"[warn] 모델 {ver}: {wrong} — 적용 거부, 지금 모델 유지")
+                    return
+                for f in tmp.iterdir():
+                    shutil.copy2(f, mdir / f.name)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
             with self.pipeline.lock:
                 self.pipeline.bundles = bundles
             self.model_version = ver
@@ -700,13 +816,30 @@ class LiveApp:
             self.client.create_cin(self.status_path, st, lbl=["aiStatus"])
         except OneM2MError as e:
             print(f"[warn] aiStatus 기록 실패: {e}")
+            if e.status == 404:         # CSE가 초기화돼 AE·컨테이너가 사라짐 — 다시 만든다
+                self._recover_resources()
         self._mirror_cin(self.status_rn, st, lbl=["aiStatus"])
+
+    def _recover_resources(self) -> None:
+        try:
+            self.setup_resources()
+            print("CSE 리소스 재생성 완료")
+        except (OneM2MError, OSError) as e:
+            print(f"[warn] CSE 리소스 재생성 실패: {e} — 다음 하트비트에 재시도")
 
     # ---- 산출물 기록 ----
 
     def _on_result(self, res: dict) -> None:
         self.levels[res["subsystem"]] = res["level"]
         self._update_siren(res)
+        sub, end = res["subsystem"], parse_ts(res["windowEnd"])
+        last = self._published.get(sub)
+        if res["level"] == "normal":
+            self._published.pop(sub, None)
+        elif last and last[0] == res["level"] and end - last[1] < ANOMALY_REPEAT_S:
+            return
+        else:
+            self._published[sub] = (res["level"], end)
         if self.skip_normal and res["level"] == "normal":
             return
         print(f"{res['windowEnd']} {res['subsystem']:<6} {res['level']:<8} "
@@ -800,22 +933,26 @@ class LiveApp:
             self.setup_resources()                  # 서버가 떠 있어야 verification 응답 가능
         print("수신 대기 중 (Ctrl+C 종료)")
         try:
-            tick = 0
             last_status = 0.0
             last_registry = 0.0
+            last_retry = time.time()
+            retry_every = 50.0 if self.poll_enabled else 10.0
+            poll_step = POLL_TICK_S if self.poll_mode == "latest" else self.poll_interval
             while True:
                 try:
                     if self.poll_enabled:
                         t0 = time.time()
                         self._poll_once()
-                        time.sleep(max(0.0, self.poll_interval - (time.time() - t0)))
+                        time.sleep(max(0.0, poll_step - (time.time() - t0)))
                     else:
                         time.sleep(1.0)
-                    tick += 1
-                    if tick % 10 == 0:                     # 미완 리소스 재시도
+                    if time.time() - last_retry >= retry_every:    # 미완 리소스 재시도
+                        last_retry = time.time()
                         if not self.poll_enabled and self.pending_subs:
                             self._try_subscriptions()
                         self._try_group()
+                        if self._remote_pending():
+                            self._setup_remote()
                     if self.status_path and time.time() - last_status >= self.status_period:
                         last_status = time.time()
                         self._write_status()
@@ -950,6 +1087,9 @@ def main() -> None:
     features.set_profile(str(cfg.get("sensor_profile", "synthetic")))
     _build_sensor_keys()
     bundles = load_models((cfg.get("paths") or {}).get("models_dir"))
+    wrong = window_mismatch(bundles)
+    if wrong:
+        raise SystemExit(f"{wrong} — 이 프로필로 다시 학습한 뒤 실행하세요 (model_iforest.py train)")
 
     if args.replay:
         run_replay(cfg, bundles, args.replay, args.max_hours, args.record_normal)

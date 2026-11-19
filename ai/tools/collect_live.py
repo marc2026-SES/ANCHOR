@@ -47,11 +47,19 @@ def main() -> None:
     ap.add_argument("--interval", type=float, default=6.0, help="폴링 간격(초)")
     ap.add_argument("--from-now", action="store_true",
                     help="백로그 생략 — 시작 이후 새 CIN만")
+    ap.add_argument("--batch", action="store_true",
+                    help="폴링 없이 --minutes 만큼 기다린 뒤 그 구간의 CIN을 컨테이너당 1회 "
+                         "조회(rcn=4+cra). CSE 부담이 적다 — CSE와 시계가 같은 곳에서 실행할 것")
+    ap.add_argument("--since", default=None,
+                    help="--batch 와 함께: 기다리지 않고 이 시각(YYYYMMDDTHHMMSS, UTC) 이후 이미 "
+                         "쌓인 CIN을 가져온다 — 지나간 안정 구간을 기준선으로 쓸 때")
     ap.add_argument("--out-dir", default=str(ROOT / "data" / "live"))
+    ap.add_argument("--ca", default=None, help="HTTPS CSE용 CA 인증서 경로")
     args = ap.parse_args()
 
     client = OneM2MClient(args.url, args.cse_rn, args.originator,
-                          rvi=args.rvi, timeout=15.0)
+                          rvi=args.rvi, timeout=15.0,
+                          ca=args.ca if args.ca else True)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -63,6 +71,24 @@ def main() -> None:
     dev_seqs: dict[str, set[int]] = {}
     ts_range: dict[tuple[str, str], list[float]] = {}
 
+    def record(key: tuple[str, str], cin: dict) -> None:
+        con = cin.get("con")
+        try:
+            data = json.loads(con) if isinstance(con, str) else dict(con or {})
+        except ValueError:
+            data = {"_raw": con}
+        seq = data.get("seq")
+        if isinstance(seq, int):
+            dev_seqs.setdefault(key[0], set()).add(seq)
+        ts = data.get("ts")
+        if isinstance(ts, (int, float)) and ts > 0:
+            r = ts_range.setdefault(key, [ts, ts])
+            r[0], r[1] = min(r[0], ts), max(r[1], ts)
+        out.write(json.dumps({"device": key[0], "sensor": key[1],
+                              "ri": cin.get("ri"), "ct": cin.get("ct"),
+                              "seq": seq, "con": data}, ensure_ascii=False) + "\n")
+        counts[key] += 1
+
     def fetch_new(key: tuple[str, str]) -> int:
         path = f"{key[0]}/{key[1]}"
         uril = client.discover_cins(path)
@@ -70,31 +96,29 @@ def main() -> None:
         got = 0
         for u in new:
             res = client.retrieve(u)
-            if res is None:
-                seen[key].add(u)          # 사라진 CIN(만료 등)은 건너뜀
-                continue
-            cin = res.get("m2m:cin") or {}
-            con = cin.get("con")
-            try:
-                data = json.loads(con) if isinstance(con, str) else dict(con or {})
-            except ValueError:
-                data = {"_raw": con}
-            seq = data.get("seq")
-            if isinstance(seq, int):
-                dev_seqs.setdefault(key[0], set()).add(seq)
-            ts = data.get("ts")
-            if isinstance(ts, (int, float)) and ts > 0:
-                r = ts_range.setdefault(key, [ts, ts])
-                r[0], r[1] = min(r[0], ts), max(r[1], ts)
-            out.write(json.dumps({"device": key[0], "sensor": key[1],
-                                  "ri": cin.get("ri"), "ct": cin.get("ct"),
-                                  "seq": seq, "con": data}, ensure_ascii=False) + "\n")
             seen[key].add(u)
-            counts[key] += 1
+            if res is None:               # 사라진 CIN(만료 등)은 건너뜀
+                continue
+            record(key, res.get("m2m:cin") or {})
             got += 1
         return got
 
-    if args.from_now:                      # 기존 경로를 '본 것'으로만 표시
+    if args.batch:
+        start_ct = args.since or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        wait_min = 0.0 if args.since else args.minutes
+        print(f"일괄 수집: {wait_min:g}분 기다린 뒤 {start_ct}(UTC) 이후 CIN을 "
+              f"컨테이너당 1회 조회 -> {out_path.relative_to(ROOT)}", flush=True)
+        time.sleep(wait_min * 60.0)
+        for key in SENSORS:
+            try:
+                cins = client.cins_created_after(f"{key[0]}/{key[1]}", start_ct)
+            except (OneM2MError, OSError) as e:
+                print(f"[warn] {key[0]}/{key[1]} 조회 실패: {e}")
+                continue
+            for cin in sorted(cins, key=lambda c: c.get("ct", "")):
+                record(key, cin)
+        args.minutes = 0.0                 # 아래 폴링 루프는 건너뛰고 요약만 출력
+    elif args.from_now:                    # 기존 경로를 '본 것'으로만 표시
         for key in SENSORS:
             try:
                 seen[key].update(client.discover_cins(f"{key[0]}/{key[1]}"))
@@ -112,8 +136,9 @@ def main() -> None:
             except (OneM2MError, OSError) as e:
                 print(f"[warn] {key[0]}/{key[1]} 백로그 실패: {e}")
         out.flush()
-    print(f"수집 시작 -> {out_path.relative_to(ROOT)} "
-          f"(백로그 {backlog:,}건, 이후 {args.minutes:g}분 라이브)")
+    if not args.batch:
+        print(f"수집 시작 -> {out_path.relative_to(ROOT)} "
+              f"(백로그 {backlog:,}건, 이후 {args.minutes:g}분 라이브)")
 
     t_end = time.monotonic() + args.minutes * 60.0
     last_status = time.monotonic()

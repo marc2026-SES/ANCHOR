@@ -30,22 +30,20 @@ echo "== 3/5 Pi 로컬 설정 생성 (CSE=localhost, 미러·레지스트리는 
 S 'cd ~/anchor-ai && .venv/bin/python - <<PY
 import yaml
 cfg = yaml.safe_load(open("config.live.yaml"))
-cfg["onem2m"]["cse_url"] = "http://127.0.0.1:8080"   # 같은 Pi 위의 ship CSE
+cfg["onem2m"]["cse_url"] = "https://127.0.0.1:8443"   # 같은 Pi 위의 ship CSE (HTTPS)
 yaml.safe_dump(cfg, open("config.pi.yaml", "w"), allow_unicode=True, sort_keys=False)
 print("config.pi.yaml 생성")
-PY'
+PY
+   mkdir -p certs && cp /opt/anchor/.runtime-ship/tls/ca.crt certs/ship-ca.crt'
 
 echo "== 4/5 Pi에서 재학습 (Python 3.13 호환 모델) =="
 S 'cd ~/anchor-ai && .venv/bin/python model_iforest.py train --profile ship \
      --csv data/ship/train.csv --models-dir models-ship'
 
 echo "== 5/5 기동 + 재부팅 자동 시작 =="
-S 'cd ~/anchor-ai && pkill -f "[a]nalytics_ae.py --config config.pi.yaml" 2>/dev/null || true
-   sleep 1
-   nohup .venv/bin/python -u analytics_ae.py --config config.pi.yaml > ai.log 2>&1 &
-   sleep 3 && tail -5 ai.log'
-S '(crontab -l 2>/dev/null | grep -v "anchor-ai/analytics"; \
-    echo "@reboot cd ~/anchor-ai && .venv/bin/python -u analytics_ae.py --config config.pi.yaml >> ai.log 2>&1") | crontab -'
+S 'bash ~/anchor-ai/tools/restart_ai.sh && tail -5 ~/anchor-ai/ai.log'
+S '(crontab -l 2>/dev/null | grep -v "analytics_ae.py"; \
+    echo "@reboot cd ~/anchor-ai && setsid .venv/bin/python -u analytics_ae.py --config config.pi.yaml >> ai.log 2>&1 < /dev/null") | crontab -'
 
 echo
 echo "배포 완료. 로그 보기:  ssh -i $KEY $HOST 'tail -f ~/anchor-ai/ai.log'"

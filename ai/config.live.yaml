@@ -13,25 +13,25 @@ paths:
   models_dir: models-ship
 
 onem2m:
-  cse_url: https://ship.local:8080      # 팀 표준 표기 (mDNS + TLS). ship.local은 같은
-                                        # LAN에서만 풀림 — 내 맥(Tailscale)에서 개발할 땐
-                                        # http://100.114.83.111:8080 으로 임시 교체
-  ca_cert: certs/anchor-ca.pem        # 팀 CA (ANCHOR Local Root CA, 2026-11-18 수령)
+  cse_url: https://100.114.83.111:8443  # 새 HTTPS CSE (2026-11-19). Pi 상주 시 생성
+                                        # 스크립트가 https://127.0.0.1:8443 으로 교체
+  ca_cert: certs/ship-ca.crt          # 선박 CSE CA (/opt/anchor/.runtime-ship/tls/ca.crt)
   cse_rn: cse-ship
   cse_id: /id-ship
   rvi: "3"
   ae:
     rn: anchorAI
     api: NanchorAI
-    originator: CAnchorAgent
+    originator: CAnchorAI   # 결과 쓰기용 — 새 CSE에 등록된 anchorAI AE (aei=CAnchorAI)
   notification:             # 폴링 모드라 미사용 (형식 유지)
     host: 127.0.0.1
     port: 9999
     path: /notify
   poll:
     enabled: true
-    interval_s: 5
-    # read_originator 제거됨 — ACP 승인(2026-11-18)으로 CAnchorAgent가 직접 읽음
+    mode: latest                    # 컨테이너별 최신 CIN(la)만 조회 — CSE 부담이 누적량과 무관
+    interval_s: 5                   # 주기가 정의되지 않은 컨테이너(hatch 등)의 기준 주기
+    read_originator: CAnchorAgent   # 센서 읽기용 — 민석이 만든 agent AE(acp-agent 권한)
   sensors:                  # 선박 CSE의 실센서 트리 (ESP32가 직접 쓰는 곳)
     - bridge/position
     - bridge/attitude
@@ -62,12 +62,16 @@ onem2m:
     members: []
   readers:                  # 산출물 조회+디스커버리(acop 34)를 열어줄 originator
     - CAnchorDashboard      # 예진 대시보드 (2026-11-20 요청)
-  mirror:                   # 결과 이중 기록 — 육상 복제본 (예진 대시보드 1순위 경로)
-    cse_url: http://100.96.155.4:30081   # seslab 육상 IN-CSE (보원 표)
-    cse_rn: cse-in
-    rvi: "3"
+  mirror:                   # 결과 이중 기록 — 육상 복제본들 (다중 대상)
+    # 실물 육상 Pi4 — 대시보드가 읽는 CSE는 https :8443 (2026-11-19 07:16 신설). 같은 Pi4의
+    # http :8080은 그 전의 다른 CSE 인스턴스라 쓰지 않는다. 쓰기 이름은 선박과 같은 CAnchorAI.
+    # (seslab :30081 은 실물 구성 이전의 모의 육상 CSE — 연결되지 않아 2026-11-19 제외)
+    - cse_url: https://100.98.242.10:8443
+      cse_rn: cse-in
+      rvi: "3"
+      ca_cert: certs/ship-ca.crt           # 선박·육상 공통 팀 CA
   model_registry:           # 클라우드 학습→배포 루프 (tools/train_publish.py가 발행)
-    enabled: true           # cse_url 생략 시 미러(육상) CSE를 레지스트리로 사용
+    enabled: true           # cse_url 생략 시 첫 미러 = 실물 육상 CSE(Pi4)를 레지스트리로 사용
     container_rn: modelRegistry
     poll_s: 30
 
