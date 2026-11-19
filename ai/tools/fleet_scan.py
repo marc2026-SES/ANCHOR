@@ -229,6 +229,8 @@ DEVIATION_SCANS = 3       # 연속 이 횟수만큼 벗어나 있어야 이탈�
 AVOID_SCANS = 2           # 충돌 회피 기준을 연속 이 횟수만큼 만족해야 경로를 바꾼다
 CONFLICT_CLEAR_NM = 3.0   # 충돌 회피 후 서로 멀어지며 이만큼 벌어지면 원래 경로로 복귀
 CONFLICT_HOLD_MAX_S = 600.0   # 그래도 안 풀리면 이 시간 뒤 복귀 (샌드박스 실시간)
+SCAN_S = 2.0              # 복귀 정밀도 계산에 쓰는 관측 간격(초)
+RETURN_MAX_S = 1500.0     # 그때까지 못 닿으면 그 자리에서 원래 경로를 건다
 MAX_ROUTE_POSTS = 12      # 배 한 척의 대피 경로를 찾을 때 경로 변경 요청 상한
 
 
@@ -345,13 +347,20 @@ class Rerouter:
         sid = ship["ship_id"]
         try:
             saved = None
-            if sid not in self.moved:
+            if sid in self.moved:
+                self.moved[sid].update({"hazardId": "", "kind": None, **reason})
+                self.moved[sid].pop("returning", None)
+            else:
                 ues = self.http.get(f"{self.base}/api/geodata", timeout=6).json().get("ues") or []
                 ue = next((u for u in ues if u.get("assetName") == sid), None)
                 orig = ((ue or {}).get("path") or {}).get("coordinates")
                 if not orig:
                     return None
-                saved = {"hazardId": "", **reason, "path": orig,
+                seg = self._nearest_segment([ship["lon"], ship["lat"]], orig)
+                (ax, ay), (bx, by) = orig[seg], orig[seg + 1]
+                along = ((bx - ax) * math.cos(math.radians(ay)) * math.sin(math.radians(ship["cog"]))
+                         + (by - ay) * math.cos(math.radians(ship["cog"])))
+                saved = {"hazardId": "", **reason, "path": orig, "fwd": along >= 0,
                          "eopMode": ue.get("eopMode"), "velocity": ue.get("velocity")}
             posts, last = 0, ""
             for route in routes:
@@ -368,7 +377,6 @@ class Rerouter:
                         with self.backup.open("a", encoding="utf-8") as bf:
                             bf.write(json.dumps({"ship": sid, "ts": time.time(), **saved}) + "\n")
                         self.moved[sid] = saved
-                    self.changed[sid] = time.time()
                     self._save()
                     return route
                 last = f"{r.status_code} {r.text[:120]}"
@@ -377,50 +385,96 @@ class Rerouter:
             print(f"[warn] {sid} 경로 변경 실패: {e}")
         return None
 
-    def _restore_orders(self, sid: str, st: dict) -> list[list]:
-        """원래 경로를 다시 걸 순서 후보 — 지도 API가 현재 위치를 맨 앞에 붙이므로, 덧붙는 구간이
-        짧도록 현재 위치에서 가까운 경유점부터 시작한다 (LOOP는 회전, REVERSE는 가까운 끝부터)."""
-        path = st["path"]
+    def _position(self, sid: str) -> list | None:
         try:
             ues = self.http.get(f"{self.base}/api/geodata", timeout=6).json().get("ues") or []
-            lon, lat = next(u for u in ues if u.get("assetName") == sid)["location"]["coordinates"]
+            return next(u for u in ues if u.get("assetName") == sid)["location"]["coordinates"]
         except Exception:
-            lon, lat = path[0]
-        near = sorted(range(len(path)), key=lambda k: (path[k][0] - lon) ** 2 + (path[k][1] - lat) ** 2)
-        if st["eopMode"] == "LOOP":
-            return [path[k:] + path[:k] for k in near]
-        ends = [path, path[::-1]]
-        return ends if near[0] < len(path) / 2 else ends[::-1]
+            return None
+
+    @staticmethod
+    def _km(a: list, b: list) -> float:
+        return math.hypot((a[0] - b[0]) * 111.32 * math.cos(math.radians(a[1])), (a[1] - b[1]) * 110.57)
+
+    def _post_original(self, sid: str, st: dict) -> bool:
+        """원래 경로·속력을 건다. 원래 경로가 해안선 판정에 걸리는 배(항구 접근 구간)는 판정을 건너뛴다 —
+        새 경로가 아니라 시나리오의 원래 경로를 되돌리는 것이므로."""
+        path = st["path"] if st.get("returning", 0) == 0 else st["path"][::-1]
+        for allow in (False, True):
+            if self._post(sid, path, st["eopMode"], st["velocity"], allow_land=allow).status_code == 200:
+                return True
+        return False
+
+    def _nearest_segment(self, pos: list, path: list) -> int:
+        """pos에서 가장 가까운 구간의 번호 i (path[i]~path[i+1])."""
+        best, where = 1e18, 0
+        kx = math.cos(math.radians(pos[1]))
+        for i in range(len(path) - 1):
+            ax, ay = (path[i][0] - pos[0]) * kx, path[i][1] - pos[1]
+            bx, by = (path[i + 1][0] - pos[0]) * kx, path[i + 1][1] - pos[1]
+            dx, dy = bx - ax, by - ay
+            t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / (dx * dx + dy * dy)))
+            d = (ax + t * dx) ** 2 + (ay + t * dy) ** 2
+            if d < best:
+                best, where = d, i
+        return where
+
+    def _start_return(self, sid: str, st: dict) -> None:
+        """복귀 1단계: 가던 방향 그대로 앞쪽 경유점으로 합류해 원래 경로의 끝점까지 간다.
+
+        지도 API는 경로를 걸 때 현재 위치를 맨 앞에 붙인다. 그 자리에서 바로 원래 경로를 걸면 엉뚱한
+        점이 경로에 영구히 남으므로, 끝점에 닿은 뒤 다시 걸어 덧붙는 점이 끝점과 겹치게 한다.
+        뒤쪽(지나온 쪽)으로 되돌리면 방금 피한 상대를 다시 거슬러 지나게 되므로 앞쪽으로 보낸다.
+        """
+        path, pos = st["path"], self._position(sid)
+        if pos is not None:
+            seg, fwd, loop = self._nearest_segment(pos, path), st.get("fwd", True), st["eopMode"] == "LOOP"
+            for allow in (False, True):
+                for step in (0, 1, 2):                      # 합류 구간이 육지에 막히면 그다음 경유점으로
+                    if fwd:
+                        k = min(seg + 1 + step, len(path) - 1)
+                        back, end = (path[k:] + [path[0]], 0) if loop else (path[k:], len(path) - 1)
+                    else:
+                        k = max(seg - step, 0)
+                        back, end = path[k::-1], 0
+                    if self._post(sid, back, "REVERSE", st["velocity"], allow_land=allow).status_code == 200:
+                        st["returning"], st["return_since"] = end, time.time()
+                        self._save()
+                        print(f"원래 항로로 복귀 시작: {sid} (경유점 {k}번으로 합류해 "
+                              f"{'시작' if end == 0 else '끝'}점까지)")
+                        return
+        st["returning"], st["return_since"] = 0, 0.0      # 돌아갈 길을 못 잡음 — 그 자리에서 바로 건다
 
     def restore_finished(self, live_hazard_ids: set[str], conflict_done: set[str]) -> None:
-        """재해가 끝났거나(태풍) 상대와 충분히 벌어진(충돌 회피) 배를 원래 경로로 돌린다.
-        육지에 막혀 거부되면 다음 순서 후보를 시도한다."""
+        """재해가 끝났거나(태풍) 상대와 충분히 벌어진(충돌 회피) 배를 원래 경로로 돌린다 (2단계)."""
         for sid, st in list(self.moved.items()):
-            if st.get("kind") == "conflict":
-                if sid not in conflict_done:
-                    continue
-            elif st["hazardId"] in live_hazard_ids:
-                continue
             try:
-                last = ""
-                for order in self._restore_orders(sid, st)[:MAX_ROUTE_POSTS]:
-                    r = self._post(sid, order, st["eopMode"], st["velocity"])
-                    if r.status_code == 200:
-                        print(f"원래 경로 복귀: {sid} (첫 경유점 {order[0]})")
-                        break
-                    last = f"{r.status_code} {r.text[:120]}"
+                if st.get("returning") is None:
+                    if st.get("kind") == "conflict":
+                        if sid not in conflict_done:
+                            continue
+                    elif st["hazardId"] in live_hazard_ids:
+                        continue
+                    self._start_return(sid, st)
+                    continue
+                pos = self._position(sid)
+                end = st["path"][0 if st["returning"] == 0 else -1]
+                late = time.time() - st.get("return_since", 0.0) >= RETURN_MAX_S
+                # 끝점에 '한 번 관측하는 동안 가는 거리' 안으로 들어오면 원래 경로를 건다. 덧붙는 점이
+                # 끝점에서 멀수록 그 구간을 다른 침로로 지나는 시간이 길어져 항로 이탈로 잡히므로,
+                # 느린 배일수록 가까이(어선 50m/s → 80m) 맞춘다.
+                near_km = min(0.6, max(0.08, float(st["velocity"] or 300) * SCAN_S * 0.75 / 1000.0))
+                if not late and (pos is None or self._km(pos, end) > near_km):
+                    continue
+                ok = self._post_original(sid, st)
+                if ok:
+                    print(f"원래 경로 복귀 완료: {sid}" + (" (끝점에 닿기 전 시간 초과)" if late else ""))
                 else:
-                    # 시나리오의 원래 경로가 해안선 판정에 걸리는 배(항구 접근 구간 등)는 어떤 순서로도
-                    # 거부된다. 새 경로가 아니라 원래 경로를 되돌리는 것이므로 판정을 건너뛰고 건다.
-                    order = self._restore_orders(sid, st)[0]
-                    r = self._post(sid, order, st["eopMode"], st["velocity"], allow_land=True)
-                    if r.status_code == 200:
-                        print(f"원래 경로 복귀: {sid} (원래 경로가 육지 판정에 걸려 allowLand 사용)")
-                    else:
-                        print(f"[warn] {sid} 원래 경로 복귀 거부({last}) — {self.backup.name} 로 수동 복구 필요")
+                    print(f"[warn] {sid} 원래 경로 복귀 거부 — {self.backup.name} 로 수동 복구 필요")
                 del self.moved[sid]
-                self.settling[sid] = time.time() + SETTLE_S
-                self.changed[sid] = time.time()
+                if late or not ok:          # 끝점에서 건 경우는 경로가 원래와 같아 보류할 이유가 없다
+                    self.settling[sid] = time.time() + SETTLE_S
+                    self.changed[sid] = time.time()
                 self._save()
             except Exception as e:
                 print(f"[warn] {sid} 원래 경로 복귀 실패: {e} — 다음 주기에 재시도")
@@ -581,7 +635,7 @@ def run_live(args) -> None:
                 if rerouter:
                     done = set()
                     for sid, st in rerouter.moved.items():
-                        if st.get("kind") != "conflict":
+                        if st.get("kind") != "conflict" or st.get("returning") is not None:
                             continue
                         me, it = ship_by_id.get(sid), ship_by_id.get(st["other"])
                         if now - st["since"] >= CONFLICT_HOLD_MAX_S:
@@ -677,8 +731,10 @@ def run_live(args) -> None:
             try:
                 for yielding, stray, a in avoidance_picks(alerts, off_route, avoid_runs,
                                                           args.avoid_cpa, args.avoid_tcpa):
-                    if yielding in rerouter.moved or now < rerouter.settling.get(yielding, 0.0):
-                        continue
+                    held = rerouter.moved.get(yielding)
+                    if (held and held.get("returning") is None) \
+                            or now < rerouter.settling.get(yielding, 0.0):
+                        continue                         # 이미 피하는 중 (복귀 중이면 다시 피할 수 있다)
                     me, it = ship_by_id[yielding], ship_by_id[stray]
                     route = rerouter.avoid(me, conflict_avoid_routes(me, it, a["tcpaMin"]),
                                            {"kind": "conflict", "other": stray, "since": now})
@@ -713,11 +769,12 @@ def run_live(args) -> None:
             if routes and routes.ships:
                 st["routeModel"] = {"version": routes.version, "ships": len(routes.ships)}
             cse.publish("fleetStatus", st, ["fleetStatus"])
-        # 정상 항적 기록(항로 학습용): 재해가 없고, 대피 중이거나 막 복귀한 배가 아닐 때만 남긴다.
+        # 정상 항적 기록(항로 학습용): 재해가 없고, 대피·복귀 중이 아니며 항로 이탈로 판정되지 않은 배만.
         if track_log and (hazards == [] or not hazard_url):
             for sh in ships:
                 sid = sh["ship_id"]
-                if rerouter and (sid in rerouter.moved or now < rerouter.settling.get(sid, 0.0)):
+                if sid in off_route or (rerouter and (sid in rerouter.moved
+                                                      or now < rerouter.settling.get(sid, 0.0))):
                     continue
                 track_log.write(json.dumps({"t": round(now, 1), "id": sid, "lat": sh["lat"],
                                             "lon": sh["lon"], "sog": round(sh["sog"], 2),
@@ -834,14 +891,14 @@ def run_selftest() -> None:
 
     class FakeMap:
         def __init__(self):
-            self.posts, self.land = [], {(129.9, 34.9)}
+            self.posts, self.land, self.loc = [], {(129.9, 34.9)}, [129.2, 34.8]
             self.path = [[129.0, 35.0], [129.5, 34.5], [130.0, 34.0]]
 
         def get(self, url, params=None, timeout=None):
             if url.endswith("/api/land"):
                 return FakeResp(200, {"land": (params["lon"], params["lat"]) in self.land})
             return FakeResp(200, {"ues": [{"assetName": "own", "eopMode": "REVERSE", "velocity": 300,
-                                           "location": {"coordinates": [129.2, 34.8]},
+                                           "location": {"coordinates": self.loc},
                                            "path": {"coordinates": self.path}}]})
 
         def post(self, url, json=None, timeout=None):
@@ -856,18 +913,40 @@ def run_selftest() -> None:
         got = rr.avoid(me, [[[129.9, 34.9], [130.0, 34.9]], [[129.4, 34.9], [129.6, 34.9]]], {"hazardId": "h1"})
         assert got == [[129.4, 34.9], [129.6, 34.9]], f"육지 후보를 건너뛰지 않음 {got}"
         rr.restore_finished({"h1"}, set())
-        assert "own" in rr.moved, "태풍이 아직 있는데 복귀함"
+        assert "own" in rr.moved and rr.moved["own"].get("returning") is None, "태풍이 아직 있는데 복귀함"
         rr.restore_finished(set(), set())
-        assert "own" not in rr.moved and rr.http.posts[-1]["path"][0] == [129.0, 35.0], "태풍 종료 후 원래 경로로 안 돌아감"
-        assert rr.http.posts[-1]["eopMode"] == "REVERSE" and rr.http.posts[-1]["velocity"] == 300
+        back = rr.http.posts[-1]
+        assert rr.moved["own"]["returning"] == 2 and back["path"][-1] == [130.0, 34.0], \
+            f"가던 방향의 끝점으로 안 보냄 {back}"
+        rr.restore_finished(set(), set())
+        assert "own" in rr.moved, "끝점에 닿기 전에 원래 경로를 걸어 버림"
+        rr.http.loc = [129.9995, 34.0005]                     # 끝점 도착
+        rr.restore_finished(set(), set())
+        last = rr.http.posts[-1]
+        assert "own" not in rr.moved and last["path"] == rr.http.path[::-1], "도착 후 원래 경로로 안 돌아감"
+        assert last["eopMode"] == "REVERSE" and last["velocity"] == 300
         rr.settling.clear()
+        rr.http.loc = [129.2, 34.8]
         rr.avoid(me, conflict_avoid_routes(me, {"lat": 34.7, "lon": 129.3, "cog": 0.0}, 3.0),
                  {"kind": "conflict", "other": "rogue", "since": 0.0})
         rr.restore_finished(set(), set())
-        assert rr.moved["own"]["kind"] == "conflict", "충돌 회피 중인데 재해 목록만 보고 복귀함"
+        assert rr.moved["own"]["kind"] == "conflict" and rr.moved["own"].get("returning") is None, \
+            "충돌 회피 중인데 재해 목록만 보고 복귀함"
         rr.restore_finished(set(), {"own"})
-        assert "own" not in rr.moved and "own" in rr.settling and "own" in rr.changed
-    print("셀프테스트 통과: 경로 변경 → 육지 후보 건너뜀 → 태풍 종료/충돌 해소 뒤에만 원래 경로·속력 복귀")
+        assert rr.moved["own"]["returning"] is not None
+        rr.avoid(me, [[[129.4, 34.9]]], {"hazardId": "h2"})   # 복귀 중 태풍이 오면 복귀를 멈추고 다시 피한다
+        assert rr.moved["own"].get("returning") is None and rr.moved["own"]["hazardId"] == "h2"
+        rr.restore_finished(set(), set())
+        rr.http.loc = [129.9995, 34.0005]
+        rr.restore_finished(set(), set())
+        assert "own" not in rr.moved and "own" not in rr.changed, "깨끗한 복귀인데 판정 보류가 걸림"
+        rr.avoid(me, [[[129.4, 34.9]]], {"hazardId": "h3"})
+        rr.http.loc = [129.4, 34.9]
+        rr.restore_finished(set(), set())
+        rr.moved["own"]["return_since"] = 0.0                 # 끝점에 못 닿고 시간 초과 → 그 자리에서 복귀
+        rr.restore_finished(set(), set())
+        assert "own" not in rr.moved and "own" in rr.changed and "own" in rr.settling
+    print("셀프테스트 통과: 경로 변경 → 육지 후보 건너뜀 → 종료 뒤 끝점까지 돌아가서 원래 경로·속력 재설정")
     print(f"셀프테스트 통과: 대피 경로 후보 {len(routes)}개, 1순위 {routes[0]} (진로에서 100km 이상, 배와 같은 쪽)")
 
 
