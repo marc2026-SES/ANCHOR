@@ -144,14 +144,16 @@ def client(name: str, profile: str, seed: int, hours: float):
 
 
 # ── 코디네이터 ───────────────────────────────────────────────────────────────
-BAD_IMPACT = {'core', 'flooded', 'down'}
+BAD_IMPACT = {'core', 'flooded', 'down', 'severe'}  # outer/degraded는 선택 유지 (사유만 기록)
 
 
 def geo_view():
     """지도 서버의 재난/접속 상태. 못 읽으면 None — 선택은 전원으로 폴백한다."""
     try:
         d = requests.get(GEO, timeout=4).json()
-        poa_imp = {p.get('assetName'): p.get('impact') for p in d.get('poas', [])}
+        def level(imp):  # 지도 서버는 impact를 {'level': 'core'|'outer', 'label': ...} 딕셔너리로 준다
+            return (imp.get('level') or imp.get('label')) if isinstance(imp, dict) else imp
+        poa_imp = {p.get('assetName'): level(p.get('impact')) for p in d.get('poas', [])}
         ue_poa = {u.get('assetName'): (u.get('poaInRange') or [None])[0] for u in d.get('ues', [])}
         return poa_imp, ue_poa
     except Exception:

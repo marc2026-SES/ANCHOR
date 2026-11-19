@@ -970,7 +970,7 @@ class Monitor:
 
     def observe_link(self, link, peer_view, source):
         """links[peer] = {reachable, observedAt} as reported by the core that pushes over that link."""
-        if not isinstance(peer_view, dict) or peer_view.get('reachable') is None:
+        if not isinstance(peer_view, dict) or 'reachable' not in peer_view:
             return
         up = bool(peer_view['reachable'])
         at = round(float(peer_view.get('observedAt') or time.time()) * 1000, 3)
@@ -1009,16 +1009,15 @@ class Monitor:
         ship, edge = self.core_status.get('ship'), self.core_status.get('edge')
         if ship and ship.get('delivery') and self.cores['ship'].ok:
             d = ship['delivery']
-            held = d['pending'] if 'pending' in d else max(0, d['accepted'] - d['coastCustody'])
-            out.update(generated=d.get('accepted'), heldOnShip=held, shipAt=ship['at'])
+            out.update(generated=d.get('accepted'), heldOnShip=max(0, d['accepted'] - d['coastCustody']),
+                       shipAt=ship['at'])
         if edge and edge.get('delivery') and self.cores['edge'].ok:
             d = edge['delivery']
             out.update(atCoast=d.get('accepted'), waitingAtCoast=max(0, d['accepted'] - d['shoreConfirmed']),
                        edgeAt=edge['at'])
         elif ship and ship.get('delivery') and self.cores['ship'].ok:
             d = ship['delivery']  # the ship learns shore receipts later, through the coast
-            if 'coastCustody' in d and 'shoreConfirmed' in d:
-                out.update(waitingAtCoast=max(0, d['coastCustody'] - d['shoreConfirmed']))
+            out.update(waitingAtCoast=max(0, d['coastCustody'] - d['shoreConfirmed']))
         return out or None
 
     # loops ---------------------------------------------------------------------
