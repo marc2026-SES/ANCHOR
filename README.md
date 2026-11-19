@@ -6,6 +6,8 @@ oneM2M Hackathon 2026 · 팀 Ctrl+Sea
 
 새 배포에서는 각 CSE를 시작한 뒤 해당 호스트에서 `./deploy/<role>/run.sh acp-provision`을 한 번 실행한다. 역할은 `ship`, `edge`, `shore` 중에서 고른다. [선박 릴레이](hardware/ship-gateway-pi5/sync/README.md)는 설치된 ACP로 육상에 전송한다.
 
+선박 시연에는 `./deploy/ship/run.sh group-demo`(조타실·기관실 보고 주기 변경)와 `./deploy/ship/run.sh sdt-read`(GPS 위치·기관실 진동 RMS·화물칸 온도 검색)를 사용한다. [시연 순서와 출력 해석](hardware/ship-gateway-pi5/sync/README.md#선박-시연)
+
 실제 ESP32 센서를 선박 Pi가 수집하고, 별도 연안 호스트가 데이터를 보관하여 육상으로 전달한다. **선박→연안과 연안→육상이 동시에 연결되어 있을 필요가 없다.** 육상 명령도 연안에 사전 보관했다가 선박에 전달한다.
 
 `anchor`는 실물 통합 실행 경로다. 이전 온도·팬·부저 모의 구현은 `src/anchor/lab/`과 `anchor-lab`으로 분리했다. 새 실행 경로는 모의 측정이나 장치 성공 결과를 만들지 않는다.

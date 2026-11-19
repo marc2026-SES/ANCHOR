@@ -71,6 +71,11 @@ def main(argv=None):
             raise ValueError('CSE MQTTS and certificate verification are required')
         os.chdir(target)
         command = [str(python), '-m', 'anchor.acme_tls', '--headless', '--base-directory', str(target), '--config', 'acme.ini', *rest]
+    elif action in ('group-demo', 'sdt-read'):
+        if role != 'ship':
+            raise ValueError(f'{action} requires the ship CSE')
+        module = 'anchor.group_demo' if action == 'group-demo' else 'anchor.sdt'
+        command = [str(python), '-m', module, '--config', str(config), *rest]
     elif action == 'acp-provision':
         if rest:
             raise ValueError('ACP provisioning uses the fixed role config')

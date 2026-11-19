@@ -86,7 +86,8 @@ def test_agent_grants_are_scoped_and_survive_rebootstrap(cse_rows):
     assert json.loads(resource(client.get(client.root + '/bridge/position/agent-read-probe'))['con']) == {
         'lat': 35.0, 'lon': 129.0}
     allowed = {'agent', 'bridge', 'engine', 'cargo', 'bridge/attitude', 'bridge/position',
-               'engine/vibration', 'engine/gas', 'cargo/climate', 'cargo/hatch'}
+               'engine/vibration', 'engine/gas', 'cargo/climate', 'cargo/hatch',
+               'bridge/shipLocation', 'engine/vibrationRms'}
     for role, (node, _) in cse_rows.items():
         for path, row in node.rows.items():
             if not row.get('acpi'):
@@ -117,8 +118,12 @@ def test_per_resource_policies_and_existing_fcnt_migration_preserve_data(cse_row
     assert fcnt['curT0'] == 24.7
     assert resource(client.get(fcnt['acpi'][0]))['rn'] == 'acp-cargo-temperature'
     protected = [(p,r) for p,r in server.rows.items() if r.get('acpi') and r['ty'] in (2,3,9,28)]
-    assert len({r['acpi'][0] for _,r in protected}) == len(protected)
-    assert all(resource(client.get(r['acpi'][0]))['rn'] == 'acp-' + p.split('/',1)[1].replace('/','-') for p,r in protected)
+    shared = {'bridge/shipLocation': 'bridge/position', 'engine/vibrationRms': 'engine/vibration'}
+    for path, row in protected:
+        target = path.split('/', 1)[1]
+        source = shared.get(target, target)
+        assert resource(client.get(row['acpi'][0]))['rn'] == 'acp-' + source.replace('/', '-')
+    assert not permission(server, 'bridge/shipLocation', 'CAnchorDashboard', 2)
     assert 'cse-ship/sensor-cargo' in server.rows  # no automatic destructive cleanup
 
 

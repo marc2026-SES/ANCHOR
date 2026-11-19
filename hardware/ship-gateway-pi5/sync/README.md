@@ -10,7 +10,7 @@
 | 선박 | `anchor-cse@ship`, `anchor-relay`, `anchor-dashboard@ship`, MQTTS 브로커 |
 | 육상 | `anchor-cse@shore`, Shore Monitor |
 
-relay는 `src/anchor`의 `client`, `config.Endpoint`, `tls`만 쓴다. 설정은 `deploy/ship/relay.json`이다.
+relay 설정은 `deploy/ship/relay.json`이다.
 
 ## 동작
 
@@ -41,6 +41,36 @@ relay는 자원이나 ACP를 만들지 않는다. 아래가 미리 있어야 한
 - 영수증(`anchor/receipts`), 선박 저널, 원격 명령, 기울기 사고 판정, batch 대조
 - relay가 꺼져 있는 동안 생긴 CIN의 보충: 알림을 받지 못한 기록은 넘어가지 않는다.
 - `:8790/status`는 relay 카운터다(`status_token_files`의 토큰 필요). 제거 전 코어의 `/status`와 형식이 다르다.
+
+## 선박 시연
+
+선박 CSE를 시작하고 `./deploy/ship/run.sh acp-provision`을 실행한다. 기존 설치에서도 이번 버전으로 한 번 실행하면 추가된 SDT 리소스 두 개가 준비된다. 기존 화물칸 온도는 계속 같은 경로를 사용한다. 갱신된 릴레이를 시작하면 새 센서 알림으로 SDT 값이 채워진다.
+
+### 그룹 명령 한 번으로 두 장치의 보고 주기 변경
+
+조타실과 기관실 ESP32의 시계 동기화와 명령 구독이 준비된 상태에서 선박 호스트에서 실행한다.
+
+```sh
+./deploy/ship/run.sh group-demo --interval-ms 500 --duration-ms 10000
+```
+
+이 명령은 `CAnchorShip`으로 `anchor/reportingGroup/fopt`에 CIN 하나를 생성한다. 기본값은 두 장치가 10초 동안 500ms 주기로 보고하는 설정이다. 조타실에는 자세 보고 주기, 기관실에는 진동 집계 시간이 적용된다. CLI는 시연 중에만 두 장치의 `commandResults/la`를 최대 30초 동안 확인한다. 결과에서 명령 ID·장치 ID·요청 원문·적용 간격·적용 시각·유지 종료 시각을 검증하고 두 장치 모두 적용을 보고하면 성공으로 종료한다. 다른 명령이 결과를 덮었거나 장치 응답이 없으면 해당 장치는 미확인으로 표시한다.
+
+### 표준 리소스에서 세 측정값 읽기
+
+```sh
+./deploy/ship/run.sh sdt-read
+```
+
+| 측정값 | 선박 CSE 상대 경로 | 표준 모델과 필드 | 유효한 입력 |
+|---|---|---|---|
+| 선박 GPS 위치 | `bridge/shipLocation` | `geoLocation`의 `latie`, `longe` (도) | GPS가 정상이고 fix가 있으며 좌표가 유효 범위 안에 있음 |
+| 기관실 진동 RMS | `engine/vibrationRms` | `numberValue`의 `numVe` (g) | 기관실 센서가 집계한 음이 아닌 `vib_rms_g` |
+| 화물칸 온도 | `cargo/temperature` | `temperature`의 `curT0` (°C) | 화물칸 센서가 `ok=true`와 유한한 `temp_c`를 보고함 |
+
+진동에는 TS-0023의 범용 숫자 모델을 사용한다. 라벨 `engine:vibration-rms`와 `unit:g`가 값의 의미와 단위를 나타낸다. GPS와 진동은 각각 원본 센서의 ACP를 공유하며 GPS의 대시보드 읽기 제한도 그대로 적용된다. [oneM2M TS-0023 ModuleClasses](https://specifications.onem2m.org/ts/ts-0023/latest/5.3/)
+
+릴레이의 별도 작업자가 센서별 최신 유효 표본 한 건을 보관하고, 값이 바뀌면 해당 선박 FCNT만 갱신한다. SDT 요청 실패는 육상 전송 큐를 막지 않는다. 조회 명령은 `CAnchorShip`으로 각 장치에서 관측된 FCNT를 검색한다. 첫 유효 표본 전에는 그 항목이 출력되지 않는다. `sampleTime`은 마지막으로 값을 바꾼 원본 CIN의 CSE 생성 시각이며, 센서 연결이 끊기면 마지막 관측값과 시각을 유지한다.
 
 ## 측정 (ESP32 3대, 초당 약 3.2건)
 

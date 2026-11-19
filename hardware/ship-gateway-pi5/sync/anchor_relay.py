@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'src'))
 
 from anchor.client import Client, OneM2MError, canonical, resource  # noqa: E402
+from anchor.sdt import LatestSDT
 from anchor.config import Endpoint  # noqa: E402
 from anchor.tls import require_https, server_context  # noqa: E402
 
@@ -184,6 +185,7 @@ class Relay:
         # shore CSE + configured origin + anchor/events + CREATE + CIN (4).
         self.events_parent = self.shore.root + '/anchor/events'
         self.events_create_confirmed = False
+        self.sdt = LatestSDT(self.ship)
         self.queue = Queue(queue_path)
         self.sources = {}  # container ri -> (device, sensor)
         self.stop = threading.Event()
@@ -231,6 +233,7 @@ class Relay:
             with self.lock:
                 self.stats['queued'] += 1
             self.wake.set()
+        self.sdt.offer(event)
         return bool(added)
 
     # ---- shore side ------------------------------------------------------------------------
@@ -379,8 +382,11 @@ def main(argv=None):
     threading.Thread(target=httpd.serve_forever, kwargs={'poll_interval': 0.2}, daemon=True).start()
     threading.Thread(target=relay.forward_loop, daemon=True, name='forward').start()
 
+    threading.Thread(target=relay.sdt.run, args=(relay.stop,), daemon=True, name='sdt').start()
+
     def shutdown(*_):
         relay.stop.set()
+        relay.sdt.wake.set()
         relay.wake.set()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)

@@ -1,6 +1,7 @@
 """Manually install the main deployment's ACPs and bind their target resources."""
 import argparse
 
+from . import sdt
 from .client import Client, resource
 from .config import DEVICES, ORIGINS, SENSORS, Settings
 from .resources import ae, assign_policy, protected_container, resource_policy
@@ -24,7 +25,13 @@ def ship_policies(admin, client, core):
             grants = sensor_grants[:2] if sensor == 'position' else sensor_grants
             if (device, sensor) in AGENT_SENSORS:
                 grants = grants + [([agent], 34)]
-            protected_container(admin, f'{device}/{sensor}', grants, owner)
+            path = f'{device}/{sensor}'
+            protected_container(admin, path, grants, owner)
+            model = sdt.MODELS.get((device, sensor))
+            if model in (sdt.GPS, sdt.VIBRATION):
+                # Share the existing source ACP (notably the private GPS permissions).
+                source = resource(admin.get(admin.root + '/' + path))
+                sdt.provision(admin, model, source['acpi'][0])
         if device in ('bridge', 'engine'):
             row = protected_container(admin, device + '/command',
                                       [([core], 63), ([owner], 2), ([owner], 1, [{'chty': [23]}])], owner)
@@ -33,16 +40,15 @@ def ship_policies(admin, client, core):
         if device == 'cargo':
             path = 'cargo/temperature'
             policy = resource_policy(admin, path, sensor_grants)
-            row = resource(admin.ensure(admin.root + '/cargo', 28, {'cod:tempe': {
-                'rn': 'temperature', 'cnd': 'org.onem2m.common.moduleclass.temperature',
-                'curT0': 0.0, 'acpi': [policy], 'lbl': ['anchor:sdt', 'quality:unobserved']}}))
-            assign_policy(admin, admin.root + '/' + path, 'cod:tempe', policy, 'CAdmin', row)
+            sdt.provision(admin, sdt.TEMPERATURE, policy)
     path = 'anchor/reportingGroup'
     policy = resource_policy(admin, path, [([core], 63)])
     row = resource(client.ensure(client.root + '/anchor', 9, {'m2m:grp': {
         'rn': 'reportingGroup', 'mt': 3, 'mnm': 2, 'mid': members}}))
     if row.get('mt') != 3:
         raise ValueError('reportingGroup must contain CNT members')
+    if row.get('mid') != members or row.get('mnm') != len(members):
+        client.update(admin.root + '/' + path, {'m2m:grp': {'mid': members, 'mnm': len(members)}})
     assign_policy(admin, admin.root + '/' + path, 'm2m:grp', policy, core, row)
 
 
