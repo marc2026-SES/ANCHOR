@@ -29,13 +29,7 @@ def package(role, destination):
                     continue
                 if any(fnmatch.fnmatch(source.name, pattern) for pattern in EXCLUDE):
                     continue
-                if rel == Path('pyproject.toml'):
-                    data = source.read_text().replace('anchor-lab = "anchor.lab.entrypoint:main"\n', '').encode()
-                    info = archive.gettarinfo(source, arcname=str(rel))
-                    info.size = len(data)
-                    archive.addfile(info, io.BytesIO(data))
-                else:
-                    archive.add(source, arcname=str(rel), recursive=False)
+                archive.add(source, arcname=str(rel), recursive=False)
         identity = (role + '\n').encode()
         info = tarfile.TarInfo('.anchor-role')
         info.size, info.mode = len(identity), 0o644

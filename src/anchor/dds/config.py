@@ -56,7 +56,7 @@ class QoS:
 @dataclass(frozen=True)
 class Config:
     mode: str
-    core_config: str
+    host_config: str
     interface: str = '127.0.0.1'
     peers: tuple = ('127.0.0.1',)
     domain_id: int = 42
@@ -92,7 +92,7 @@ class Config:
         value = json.loads(path.read_text())
         value['qos'] = QoS(**value.get('qos', {}))
         value['peers'] = tuple(value.get('peers', ['127.0.0.1']))
-        value['core_config'] = str((path.parent / value['core_config']).resolve())
+        value['host_config'] = str((path.parent / value['host_config']).resolve())
         return cls(**value)
 
     def xml(self):

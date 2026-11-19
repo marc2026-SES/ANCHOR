@@ -1,6 +1,6 @@
 {
   "mode": "ipe",
-  "core_config": "core.container.json",
+  "host_config": "host.container.json",
   "interface": "127.0.0.1",
   "peers": ["127.0.0.1"],
   "domain_id": 42,

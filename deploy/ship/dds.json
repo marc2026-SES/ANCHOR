@@ -1,6 +1,6 @@
 {
   "mode": "publisher",
-  "core_config": "core.json",
+  "host_config": "host.json",
   "interface": "127.0.0.1",
   "peers": ["127.0.0.1"],
   "domain_id": 42,

@@ -1,0 +1,17 @@
+{
+  "role": "shore",
+  "vessel_id": "ship-001",
+  "tls_ca": "../../.runtime-shore/tls/ca.crt",
+  "tls_cert": "../../.runtime-shore/tls/server.crt",
+  "tls_key": "../../.runtime-shore/tls/server.key",
+  "nodes": {
+    "shore": {
+      "url": "https://127.0.0.1:8080",
+      "root": "cse-in",
+      "csi": "/id-in",
+      "rvi": "3",
+      "timeout": 3,
+      "ca": "../../.runtime-shore/tls/ca.crt"
+    }
+  }
+}

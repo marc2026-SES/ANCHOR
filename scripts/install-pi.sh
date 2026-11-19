@@ -28,4 +28,4 @@ fi
 python3 -m venv "$venv_dir"
 "$venv_dir/bin/python" -m pip install -e "$acme_dir" -e "$repo_root"
 printf '\nInstalled. Activate with: source "%s/bin/activate"\n' "$venv_dir"
-echo 'Configure deploy/<ship|edge|shore>/core.json and cse.ini. See README migration steps.'
+echo 'Configure deploy/<ship|edge|shore>/host.json and cse.ini. See README migration steps.'

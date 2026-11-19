@@ -1,0 +1,17 @@
+{
+  "role": "ship",
+  "vessel_id": "ship-001",
+  "tls_ca": "../../.runtime-ship/tls/ca.crt",
+  "tls_cert": "../../.runtime-ship/tls/server.crt",
+  "tls_key": "../../.runtime-ship/tls/server.key",
+  "nodes": {
+    "ship": {
+      "url": "https://127.0.0.1:8080",
+      "root": "cse-ship",
+      "csi": "/id-ship",
+      "rvi": "3",
+      "timeout": 3,
+      "ca": "../../.runtime-ship/tls/ca.crt"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed-role deployment entrypoint. No service starts another role's CSE/core."""
+"""Fixed-role deployment entrypoint. No service starts another role's CSE."""
 import configparser
 import json
 import os
@@ -17,7 +17,7 @@ def prepare(role):
     marker = ROOT / '.anchor-role'
     if marker.exists() and marker.read_text().strip() != role:
         raise ValueError('This deployment package belongs to a different role')
-    config = ROOT / 'deploy' / role / 'core.json'
+    config = ROOT / 'deploy' / role / 'host.json'
     settings = Settings.load(config)
     if settings.role != role:
         raise ValueError(f'{config}: role must be {role}')
@@ -34,7 +34,7 @@ def prepare(role):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) < 2 or argv[0] not in ('ship', 'edge', 'shore'):
-        raise ValueError('Usage: deploy/<role>/run.sh check|init-cse|cse|core|dashboard|<anchor command>')
+        raise ValueError('Usage: deploy/<role>/run.sh check|init-cse|cse|dashboard|dds|dds-check|dds-provision')
     role, action, *rest = argv
     config, settings, runtime = prepare(role)
     python = Path(os.environ.get('ANCHOR_VENV', ROOT / '.venv')) / 'bin/python'
@@ -43,7 +43,7 @@ def main(argv=None):
         client_context(settings.tls_ca, settings.tls_cert, settings.tls_key)
         print(json.dumps({'role': role, 'config': str(config), 'tls': 'loaded',
                           'cseDirectory': str(runtime / 'cse'),
-                          'processes': ['cse', 'core'] + ([] if role == 'edge' else ['dashboard'])
+                          'processes': ['cse'] + ([] if role == 'edge' else ['dashboard'])
                           + (['mosquitto', 'chrony'] if role == 'ship' else [])}, indent=2))
         return
     if action == 'init-cse':
@@ -71,25 +71,22 @@ def main(argv=None):
             raise ValueError('CSE MQTTS and certificate verification are required')
         os.chdir(target)
         command = [str(python), '-m', 'anchor.acme_tls', '--headless', '--base-directory', str(target), '--config', 'acme.ini', *rest]
-    elif action in ('dds', 'dds-check'):
+    elif action in ('dds', 'dds-check', 'dds-provision'):
         if role == 'shore':
             raise ValueError('DDS runs on the ship publisher and coastal IPE only')
         if rest:
             raise ValueError('DDS deployment uses its fixed role config; extra arguments are not allowed')
         command = [str(python), '-m', 'anchor.dds.cli', '--config',
                    str(ROOT / 'deploy' / role / 'dds.json'),
-                   'run' if action == 'dds' else 'check']
+                   {'dds': 'run', 'dds-check': 'check', 'dds-provision': 'provision'}[action]]
     elif action == 'dashboard':
         if role == 'edge':
-            raise ValueError('Edge uses the core dashboard; it has no sensor/camera dashboard')
+            raise ValueError('Edge has no sensor/camera dashboard')
         relative = {'ship': 'ship-gateway-pi5/dashboard/server.py',
                     'shore': 'shore-server-pi4/shore-dashboard/shore_server.py'}[role]
         command = ['/usr/bin/python3', str(ROOT / 'hardware' / relative), *rest]
     else:
-        if action == 'command' and role != 'shore':
-            raise ValueError('Only shore issues operator commands')
-        command = [str(python), '-m', 'anchor.entrypoint', '--config', str(config),
-                   'serve' if action == 'core' else action, *rest]
+        raise ValueError(f'Unsupported action: {action}')
     os.execv(command[0], command)
 
 
