@@ -637,3 +637,15 @@ table.acp tr.star td { background: rgba(189, 140, 55, 0.07); }
 table.acp tr.star:hover td { background: rgba(189, 140, 55, 0.12); }
 table.acp tr.star td:first-child { box-shadow: inset 2px 0 0 rgba(232, 184, 101, 0.8); }
 table.acp .grant .who { color: #c9dcea; }
+
+/* ── sticky command deck: the header stays, tabs and below scroll ────────── */
+.console { position: sticky; top: 0; z-index: 60;
+  background: rgba(6, 17, 27, 0.96); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  box-shadow: 0 10px 24px rgba(3, 9, 14, 0.55), 0 0 18px rgba(95, 195, 239, 0.05); }
+
+/* fold long tables behind a toggle */
+.more-btn { font: inherit; font-size: 12px; font-weight: 600; color: #9fdcff; cursor: pointer;
+  background: rgba(95, 195, 239, 0.08); border: 1px solid rgba(95, 195, 239, 0.3);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+  padding: 5px 16px; margin: 2px 0 8px; }
+.more-btn:hover { background: rgba(95, 195, 239, 0.16); }

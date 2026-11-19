@@ -1,5 +1,6 @@
 // AI tab and alert strip. Data: the anchorAI resources (the shore CSE's copy, else the ship CSE), read by
 // the Shore Monitor as CAnchorDashboard (live), or demo samples. Field meanings follow the AI spec ("AI → 대시보드 연동 스펙").
+import { useState } from 'react'
 import type { AiAnomaly, AiInfo, AiLevel, AiPrognosis, AiState, FleetInfo } from '../types'
 import { clock } from '../theme'
 import { fmtMs } from '../lib/metrics'
@@ -105,7 +106,11 @@ function StatusCard({ ai, now, live }: { ai: AiInfo; now: number; live: boolean 
   )
 }
 
+const ANOMALY_FOLD = 5
+
 function AnomalyTable({ rows, now }: { rows: AiAnomaly[]; now: number }) {
+  const [showAll, setShowAll] = useState(false)
+  const shown = showAll ? rows : rows.slice(0, ANOMALY_FOLD)
   return (
     <section className="panel">
       <header className="panel-head"><h3>Anomalies</h3><span>created only when the AI sees one, top features say why (larger |z| = stronger)</span></header>
@@ -113,7 +118,7 @@ function AnomalyTable({ rows, now }: { rows: AiAnomaly[]; now: number }) {
         <table className="ai-table">
           <thead><tr><th>Time (UTC)</th><th>Subsystem</th><th>Level</th><th>Score</th><th>Why</th></tr></thead>
           <tbody>
-            {rows.map(a => (
+            {shown.map(a => (
               <tr key={a.eventId}>
                 <td>{clock(a.at)}<small>{fmtMs(now - a.at)} ago</small></td>
                 <td>{a.subsystem}</td>
@@ -127,6 +132,11 @@ function AnomalyTable({ rows, now }: { rows: AiAnomaly[]; now: number }) {
             ))}
           </tbody>
         </table>
+      )}
+      {rows.length > ANOMALY_FOLD && (
+        <button className="more-btn" onClick={() => setShowAll(v => !v)}>
+          {showAll ? 'Show the latest 5' : `View all ${rows.length}`}
+        </button>
       )}
     </section>
   )
