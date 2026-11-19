@@ -1,0 +1,17 @@
+# ACME CSE for ANCHOR inside MEC Sandbox (HTTPS via anchor.acme_tls). Build from the repo root:
+#   docker build -f deploy/mec/Dockerfile.acme -t meep-docker-registry:30001/anchor-acme:<tag> .
+FROM python:3.12-slim
+ARG ACME_REV=283bd7d696090e983c07c149511102caab99642e
+WORKDIR /app
+COPY pyproject.toml README.md constraints-tested.txt ./
+COPY src ./src
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    pip install --no-cache-dir -c constraints-tested.txt . "git+https://github.com/ankraft/ACME-oneM2M-CSE.git@${ACME_REV}" && \
+    apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
+    useradd --uid 10001 --create-home anchor && mkdir -p /var/lib/acme /var/lib/anchor-tls && \
+    chown anchor /var/lib/acme /var/lib/anchor-tls
+COPY deploy/mec/acme/ /etc/anchor/
+COPY deploy/mec/tls-env.sh /usr/local/lib/anchor/tls-env.sh
+COPY deploy/mec/acme-entrypoint.sh /usr/local/bin/anchor-acme
+USER 10001
+ENTRYPOINT ["/usr/local/bin/anchor-acme"]
