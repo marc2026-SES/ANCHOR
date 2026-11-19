@@ -44,8 +44,16 @@ def api(path):
     return r.json()
 
 
+_cache = {'at': 0.0, 'v': None}
+
+
 def run():
-    return api('/api/run?after=0')
+    # the monitor sends the full record set; one agent question calls several tools,
+    # so reuse one fetch for a few seconds instead of pulling it four times
+    if time.time() - _cache['at'] > 3 or _cache['v'] is None:
+        _cache['v'] = api('/api/run?after=0')
+        _cache['at'] = time.time()
+    return _cache['v']
 
 
 def age(ms):
@@ -60,9 +68,16 @@ def link_status() -> dict:
     data is held on the ship and waiting at the MEC because of cuts."""
     v = run()
     live = v.get('live') or {}
-    links = {k: {'up': l.get('up'), 'observed_s_ago': age(l.get('observedAt')),
-                 'source': l.get('source')}
-             for k, l in (live.get('links') or {}).items()}
+    def link(l):
+        known = l.get('known')
+        d = {'known': known, 'observed_s_ago': age(l.get('observedAt')), 'source': l.get('source')}
+        if known:
+            d['up'] = l.get('up')
+        else:  # the core has not reported recently: current state unknown, last value is history
+            d['up'] = None
+            d['last_observed_up'] = l.get('up')
+        return d
+    links = {k: link(l) for k, l in (live.get('links') or {}).items()}
     shore_at = [e['shoreAt'] for e in v.get('events', []) if e.get('shoreAt')]
     return {'run': v.get('runId'), 'mode': v.get('mode'), 'links': links,
             'backlog': live.get('backlog'),
@@ -77,9 +92,9 @@ def ship_health() -> dict:
     ai = v.get('ai') or {}
     return {'state': ai.get('state'), 'error': ai.get('error'),
             'source': ai.get('source'), 'status': ai.get('status'),
-            'latest_anomalies': (ai.get('anomaly') or [])[-5:],
-            'forecasts': (ai.get('prognosis') or [])[-3:],
-            'link_forecasts': (ai.get('linkForecast') or [])[-3:]}
+            'latest_anomalies_newest_first': (ai.get('anomaly') or [])[:5],
+            'forecasts_newest_first': (ai.get('prognosis') or [])[:3],
+            'link_forecasts_newest_first': (ai.get('linkForecast') or [])[:3]}
 
 
 @mcp.tool()
@@ -91,13 +106,16 @@ def fleet_status() -> dict:
 
 
 @mcp.tool()
-def fleet_conflicts(limit: int = 10) -> list:
+def fleet_conflicts(limit: int = 10) -> dict:
     """Latest fleet warnings: collision risks, typhoon/surge hazards (with AI
     rerouting), route deviations. Newest first."""
     v = run()
-    f = v.get('fleet') or {}
+    f = v.get('fleet')
+    if not f:
+        return {'watching': False, 'state': 'not configured', 'conflicts': []}
     out = sorted(f.get('conflicts') or [], key=lambda c: c.get('at', 0), reverse=True)
-    return out[:max(1, min(limit, 40))]
+    return {'watching': f.get('state') == 'ok', 'state': f.get('state'),
+            'error': f.get('error'), 'conflicts': out[:max(1, min(limit, 40))]}
 
 
 @mcp.tool()
