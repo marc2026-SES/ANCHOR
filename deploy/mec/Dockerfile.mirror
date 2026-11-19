@@ -1,0 +1,14 @@
+# Ship mirror copier for the MEC Sandbox (see mirror-entrypoint.sh). Build from the repo root:
+#   docker build -f deploy/mec/Dockerfile.mirror -t meep-docker-registry:30001/anchor-mirror:<tag> .
+FROM python:3.12-slim
+WORKDIR /app
+COPY pyproject.toml README.md constraints-tested.txt ./
+COPY src ./src
+RUN pip install --no-cache-dir -c constraints-tested.txt . && useradd --uid 10001 --create-home anchor && \
+    mkdir -p /var/lib/anchor-tls && chown anchor /var/lib/anchor-tls
+COPY deploy/mec/tls-env.sh /usr/local/lib/anchor/tls-env.sh
+COPY deploy/mec/ship_link.py /usr/local/bin/ship_link.py
+COPY deploy/mec/mirror-entrypoint.sh /usr/local/bin/anchor-mirror
+USER 10001
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["/usr/local/bin/anchor-mirror"]

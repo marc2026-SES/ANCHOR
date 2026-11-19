@@ -1,5 +1,6 @@
 """Render a separate core handover scenario from the existing two-edge sandbox export."""
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -18,10 +19,13 @@ def render(scenario, name, image, mirror_command=None):
             raise ValueError(f'Missing {app} on {host}: export the existing two-edge scenario')
         if host == 'ship-001' and mirror_command:
             # Only the existing mirror runs here. Do not start a second sensor sender.
-            processes.append(dict(id=str(uuid.uuid4()), name='anchor-ship-mirror', type=process['type'],
-                                  image=process['image'], dependencies=process.get('dependencies', []),
-                                  environment=process['environment'], commandExe=mirror_command[0],
-                                  commandArguments=','.join(mirror_command[1:])))
+            # AdvantEDGE rejects a process without netChar ("Missing network characteristics"):
+            # start from the ship app's process definition and drop its service.
+            mirror = copy.deepcopy(process)
+            mirror.pop('serviceConfig', None)
+            mirror.update(id=str(uuid.uuid4()), name='anchor-ship-mirror', commandExe=mirror_command[0],
+                          commandArguments=','.join(mirror_command[1:]))
+            processes.append(mirror)
         process['image'] = image
         process.pop('commandExe', None)
         process.pop('commandArguments', None)
