@@ -218,9 +218,9 @@ function drawBoat(cv: HTMLCanvasElement, boat: { roll: number; pitch: number }, 
 
 const num = (v: unknown) => (typeof v === 'number' ? v : null)
 
-// The ship dashboard's live attitude stream (20 Hz SSE). Needs CORS on the Pi 5 server and a
-// browser that trusts the team CA; when unreachable the hull simply follows the shore records.
-const LIVE_SSE = 'https://100.114.83.111:8090/api/live'
+// The ship dashboard's live attitude stream (20 Hz SSE), relayed by the Shore Monitor on the same
+// origin (no CORS, no extra certificate). When unreachable the hull follows the shore records.
+const LIVE_SSE = '/live.sse'
 
 export function ShipHull3D({ events, now, height = 300 }: { events: Delivered[]; now: number; height?: number }) {
   const [exaggerate, setExaggerate] = useState(true)

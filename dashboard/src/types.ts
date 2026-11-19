@@ -97,6 +97,8 @@ export interface Run {
   /** AI results read from the ship CSE (live), or demo samples */
   ai?: AiInfo | null
   fleet?: FleetInfo | null
+  /** where "open the ship's IN dashboard" points when the MEC view is served from another host (ui.in_url) */
+  inUrl?: string | null
 }
 
 // ── AI results (<root>/anchorAI/… on the shore CSE copy, else the ship CSE, read by the Shore Monitor;

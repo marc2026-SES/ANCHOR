@@ -68,7 +68,7 @@ export function LinkBanner({ events, now, m, mode }: { events: Delivered[]; now:
     g.clearRect(0, 0, w, h)
     const x = (t: number) => (t - (now - WIN)) / WIN * w
     // base: green while data was flowing (grey until the first record)
-    g.fillStyle = a.age === null ? 'rgba(126,180,214,0.14)' : 'rgba(47,174,118,0.4)'
+    g.fillStyle = a.age === null ? 'rgba(126,180,214,0.14)' : 'rgba(63,154,208,0.5)'
     g.fillRect(0, 0, w, h)
     g.font = '600 10px Pretendard, system-ui, sans-serif'
     g.textBaseline = 'middle'

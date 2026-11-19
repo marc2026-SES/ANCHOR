@@ -47,13 +47,9 @@ export function DeliveryDonut({ events, now, heldOnShip, waitingAtCoast, lost, h
         emphasis: { scaleSize: 4, label: { show: false } },
         data: SLICES.map(s => ({
           name: s.name, value: counts[s.key],
-          itemStyle: {
-            color: s.color,
-            // texture on the "waited" slice: identity never rests on hue alone (blue/purple can
-            // end up adjacent when the other slices are empty)
-            ...(s.key === 'late' ? { decal: { symbol: 'rect', color: 'rgba(255,255,255,0.35)',
-              rotation: Math.PI / 4, symbolSize: 1, dashArrayX: [1, 0], dashArrayY: [2, 5] } } : {}),
-          },
+          // solid fills: hatching now means "missing data" on the arrival strip, so the
+          // delivered-after-waiting slice stays solid purple everywhere
+          itemStyle: { color: s.color },
         })).filter(d => d.value > 0),
       }],
       graphic: [{

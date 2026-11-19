@@ -83,9 +83,11 @@ DEFAULTS = {
     'fleet': {'enabled': True, 'ae': 'fleetAI', 'scan_seconds': 10, 'stale_seconds': 90},
     # Deck camera: the ship dashboard's MJPEG stream (Pi 5, /stream.mjpg), re-served here as /cam.mjpg so the
     # page stays on one origin (no CORS, no second certificate to trust). url empty = no camera.
-    'camera': {'url': '', 'timeout': 5},
+    'camera': {'url': '', 'timeout': 5, 'live_url': ''},
     # The coastal MEC map server, re-served under /map/ so the dashboard (https) can embed it. url empty = off.
     'map': {'url': '', 'timeout': 5},
+    # MEC-hosted copy only: where the "open the ship's IN dashboard" links point. Empty = same origin (/).
+    'ui': {'in_url': ''},
 }
 
 POSITION_FIELDS = ('lat', 'lon')
@@ -1204,7 +1206,8 @@ def run_view(monitor, run_id=None, after=0):
         return {'runId': row['run_id'], 'mode': row['mode'], 'start': start, 'end': end, 'now': now_ms(),
                 'rev': rev, 'after': after, 'events': events, 'commands': commands, 'links': links,
                 'live': live, 'ai': monitor.ai.view(db, start, upper) if monitor.ai else None,
-                'fleet': monitor.fleet.view(db, start, upper) if monitor.fleet else None}
+                'fleet': monitor.fleet.view(db, start, upper) if monitor.fleet else None,
+                'inUrl': (monitor.cfg.get('ui') or {}).get('in_url') or None}
     finally:
         db.close()
 
@@ -1346,8 +1349,36 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
             finally:
                 up.close()
 
+        def live(self):
+            """Relay the ship dashboard's 20 Hz attitude stream (SSE) so the page needs no CORS and
+            no second certificate. One upstream connection per viewer; flushed per chunk."""
+            if not (camera and camera.get('live_url')):
+                return self.reply(404, {'error': 'no live stream configured'})
+            try:
+                ctx = ssl.create_default_context(cafile=camera.get('ca') or None) \
+                    if camera['live_url'].startswith('https://') else None
+                up = urllib.request.urlopen(camera['live_url'], context=ctx, timeout=camera.get('timeout', 5))
+            except Exception as exc:
+                return self.reply(503, {'error': f'live stream unavailable: {describe(exc)}'})
+            self.send_response(200)
+            self.send_header('Content-Type', up.headers.get('Content-Type') or 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache, private')
+            self.end_headers()
+            try:
+                while chunk := up.read(2048):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                up.close()
+
         def do_GET(self):
             url = urlparse(self.path)
+            if url.path == '/live.sse':
+                if not self.allowed():
+                    return self.reply(401, {'error': 'unauthorized'})
+                return self.live()
             if url.path == '/map':
                 self.send_response(302)
                 self.send_header('Location', '/map/')

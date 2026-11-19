@@ -79,7 +79,7 @@ export function TopologyMap({ link, inferred, m, held }: {
         <Node x={337} y={Y} title="SHIP Pi 5" sub="cse-ship, core"
           value={heldShip === null ? '—' : n(heldShip)} note="held on ship" />
         <LinkLine x1={412} x2={548} y={LY} id="A" state={link.A} inferred={inferred?.A} />
-        <Node x={623} y={Y} title="COAST MEC" sub="cse-edge, core, fleet-ai"
+        <Node x={623} y={Y} title="COAST MEC" sub="cse-edge, core"
           value={waiting === null ? '—' : n(waiting)} note="waiting for B" />
         <LinkLine x1={698} x2={834} y={LY} id="B" state={link.B} inferred={inferred?.B} />
         <Node x={909} y={Y} title="SHORE Pi 4" sub="cse-in, core, anchorAI copy"

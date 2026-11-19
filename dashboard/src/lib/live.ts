@@ -11,7 +11,7 @@ interface ApiCommand {
 }
 interface ApiRun {
   runId: string; mode: 'anchor' | 'baseline'; start: number; end: number | null; now: number; rev: number; after: number
-  events: Delivered[]; commands: ApiCommand[]; links: LinkChange[]; live: LiveInfo | null; ai?: AiInfo | null; fleet?: FleetInfo | null
+  events: Delivered[]; commands: ApiCommand[]; links: LinkChange[]; live: LiveInfo | null; ai?: AiInfo | null; fleet?: FleetInfo | null; inUrl?: string | null
 }
 
 const POLL_MS = 2_000
@@ -113,7 +113,7 @@ export function useLiveRun(enabled: boolean): LiveState {
         const commands = api.commands.map(x => toCommand(x, events))
         const run: Run = {
           runId: api.runId, mode: api.mode, start: api.start, end: api.end ?? api.now,
-          events, links, commands, feed: buildFeed(events, links, commands), live: api.live, ai: api.ai ?? null, fleet: api.fleet ?? null,
+          events, links, commands, feed: buildFeed(events, links, commands), live: api.live, ai: api.ai ?? null, fleet: api.fleet ?? null, inUrl: api.inUrl ?? null,
         }
         if (!stop) setState({ run, skew: api.now - Date.now(), error: null })
       } catch (err) {

@@ -6,6 +6,7 @@ import { StatusBar, Playback } from './components/StatusBar'
 import { KpiCards } from './components/KpiCards'
 import { Tabs, type TabId } from './components/Tabs'
 import { AiAlerts, AiTab } from './components/AiTab'
+import { MecDashboard } from './components/MecView'
 import { DeliveryDonut } from './components/DeliveryDonut'
 import { TopologyMap } from './components/TopologyMap'
 import { ShipHull3D } from './components/ShipHull3D'
@@ -23,7 +24,10 @@ import { C, LINK, clock } from './theme'
 
 const TAIL = 60_000 // keep playing a moment after the run so the last records can arrive
 /** ?live = read the Shore Monitor AE (server/shore_monitor.py) through /api instead of the dummy run */
-const LIVE = new URLSearchParams(window.location.search).has('live')
+const MEC_VIEW = new URLSearchParams(window.location.search).has('mec')
+// the MEC view is live by default (it only makes sense against the real CSEs); ?demo forces the dummy run
+const LIVE = new URLSearchParams(window.location.search).has('live') ||
+  (MEC_VIEW && !new URLSearchParams(window.location.search).has('demo'))
 const LINKS: LinkId[] = ['A', 'B']
 
 function emptyRun(now: number): Run {
@@ -142,6 +146,9 @@ export default function App() {
   const fleet = useMemo(() => (LIVE ? run.fleet : demoFleet(run)), [run])
   const otherMode = run.mode === 'anchor' ? 'baseline' : 'anchor'
 
+  if (MEC_VIEW) {
+    return <MecDashboard fleet={fleet} inUrl={run.inUrl ?? null} now={now} live={LIVE} />
+  }
   return (
     <div className="page">
       {/* always visible, whatever the tab */}
@@ -164,13 +171,6 @@ export default function App() {
       {tab === 'overview' && (
         <div className="tab-body overview-hud">
           <TopologyMap link={link} inferred={linkInferred(run, now, following)} m={metrics} held={held ?? undefined} />
-          {LIVE && (
-            <section className="panel map-embed">
-              <header className="panel-head"><h3>Fleet map</h3>
-                <span>the coastal MEC map server, relayed by the Shore Monitor</span></header>
-              <iframe src="/map/" title="fleet map" />
-            </section>
-          )}
           <LinkBanner events={run.events} now={now} m={metrics} mode={run.mode} />
           <div className="ov-row">
             <ContinuityTimeline events={run.events} links={run.links} start={start} end={end} now={now} height={470} mode={run.mode} />
@@ -200,7 +200,7 @@ export default function App() {
         ? <MeasurementTab anchor={run.mode === 'anchor' ? run : runs.anchor} baseline={run.mode === 'baseline' ? run : runs.baseline}
             note={`${run.mode === 'anchor' ? 'ANCHOR' : 'Baseline'}: live run ${run.runId}, ${otherMode === 'anchor' ? 'ANCHOR' : 'Baseline'}: dummy data`} />
         : <MeasurementTab anchor={runs.anchor} baseline={runs.baseline} />)}
-      {tab === 'ai' && <AiTab ai={ai} fleet={fleet} now={now} live={LIVE} />}
+      {tab === 'ai' && <AiTab ai={ai} now={now} live={LIVE} />}
       {tab === 'security' && <SecurityTab />}
 
       {tab === 'sensors' && (
