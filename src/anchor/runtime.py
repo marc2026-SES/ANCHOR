@@ -183,10 +183,22 @@ class Runtime:
         with self.lock:
             events = list(self._events)
         lookup = {event['eventId']: event for event in events}
-        remote_receipts = self.values(remote, 'receipts')
         remote_events = {e['eventId']: e for e in self.values(remote, 'events', validate_event)}
+        # Forward first. An event the peer does not hold yet must not wait behind receipt
+        # bookkeeping for older events; an identical event already stored there only waits
+        # for its receipt and is not sent again.
+        unsent = [e for e in events if remote_events.get(e['eventId']) != e]
+        for event in fair_batch(unsent, self.settings.batch_size, self.settings.critical_burst):
+            try:
+                remote.put('events', event['eventId'], event)
+            except ValueError as exc:
+                self.quarantine('forward:' + event['eventId'], exc)
+        # Then reconcile receipts. Every receipt is still verified below; only the local copy
+        # is written a bounded number per tick, so a receipt backlog cannot stall forwarding.
+        remote_receipts = self.values(remote, 'receipts')
         local_receipts = {(r.get('holder'), r.get('eventId')): r for r in self.values(self.journal, 'receipts')}
         accepted = set()
+        copied = 0
         for receipt in remote_receipts:
             event = lookup.get(receipt.get('eventId'))
             if event is None:
@@ -205,16 +217,10 @@ class Runtime:
                 if stored != event:
                     continue
                 accepted.add(event['eventId'])
-            if local_receipts.get((holder, event['eventId'])) != receipt:
+            if local_receipts.get((holder, event['eventId'])) != receipt and copied < self.settings.batch_size:
                 self.journal.put('receipts', holder + ':' + event['eventId'], receipt)
+                copied += 1
         pending = [e for e in events if e['eventId'] not in accepted]
-        # An identical event already stored at the peer only waits for its receipt.
-        unsent = [e for e in pending if remote_events.get(e['eventId']) != e]
-        for event in fair_batch(unsent, self.settings.batch_size, self.settings.critical_burst):
-            try:
-                remote.put('events', event['eventId'], event)
-            except ValueError as exc:
-                self.quarantine('forward:' + event['eventId'], exc)
         with self.lock:
             self.links[peer] = {'reachable': True, 'observedAt': time.time(), 'pendingAtPeer': len(pending)}
 
