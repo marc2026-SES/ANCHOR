@@ -1,0 +1,15 @@
+**
+!README.md
+!pyproject.toml
+!src/
+!src/anchor/
+!src/anchor/*.py
+!src/anchor/dds/
+!src/anchor/dds/*.py
+!hardware/
+!hardware/ship-gateway-pi5/
+!hardware/ship-gateway-pi5/sync/
+!hardware/ship-gateway-pi5/sync/anchor_relay.py
+!deploy/
+!deploy/mec/
+!deploy/mec/start_relay.py

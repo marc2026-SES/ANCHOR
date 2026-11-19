@@ -9,9 +9,9 @@
 - The relay subscribes to the six sensor containers (subscription `anchor-core`, nct=1) and uses
   the CIN carried by each notification. It never lists or re-reads the ship CSE.
 - Each hardware CIN is wrapped in a versioned envelope (schemaVersion 2) and created in
-  <shore>/anchor/events under a deterministic name, so a repeated send is a 4105 conflict
+  the selected destination's anchor/events under a deterministic name, so a repeated send is a 4105 conflict
   instead of a duplicate. Only a 4105 triggers a GET of that exact CIN to verify its content.
-- Records stay in the SQLite queue until the shore has stored them.
+- Records stay in the SQLite queue until that destination has stored them. In MEC mode each edge continues delivery to shore.
 
 It needs, on the CSEs it talks to (created by the deployment, not by the relay):
   ship : read + subscribe on <device>/<sensor> for the relay originator
@@ -33,11 +33,14 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'src'))
 
-from anchor.client import Client, OneM2MError, canonical, resource  # noqa: E402
+from anchor.client import Client, canonical, resource  # noqa: E402
+from anchor.edge_forward import EdgeForwarder
+from anchor.handover import EventTarget, watch_location
 from anchor.sdt import LatestSDT
 from anchor.config import Endpoint  # noqa: E402
 from anchor.tls import require_https, server_context  # noqa: E402
@@ -130,14 +133,29 @@ class Config:
             return str(value if Path(value).is_absolute() else (path.parent / value).resolve())
 
         self.vessel_id = data.get('vessel_id', 'ship-001')
-        self.origin = data.get('origin', 'CAnchorShip')
+        self.role = data.get('role', 'ship')
+        if self.role not in ('ship', 'edge'):
+            raise ValueError('Relay role must be ship or edge')
+        self.origin = data.get('origin', 'CAnchorEdge' if self.role == 'edge' else 'CAnchorShip')
         self.bind, self.port = data.get('bind', '127.0.0.1'), int(data.get('port', 8790))
         self.notify_url = require_https(data.get('notify_url', f'https://127.0.0.1:{self.port}/notify'))
         self.tls_cert, self.tls_key = located(data['tls_cert']), located(data['tls_key'])
         self.queue = located(data.get('queue', '../../.runtime-ship/relay-queue.db'))
         self.status_tokens = [located(f) for f in data.get('status_token_files', [])]
         self.nodes = {}
-        for name in ('ship', 'shore'):
+        self.handover = data.get('handover')
+        if self.handover is not None:
+            location = urlsplit(self.handover['location_url'])
+            if location.scheme not in ('http', 'https') or not location.hostname or location.username or location.password:
+                raise ValueError('Expected a MEC013 HTTP(S) URL without credentials')
+            if 'ca' in self.handover:
+                self.handover['ca'] = located(self.handover['ca'])
+        node_names = (self.role, 'shore')
+        if self.handover is not None:
+            if self.role != 'ship':
+                raise ValueError('Only a ship selects an edge')
+            node_names = ('ship', 'mep1', 'mep2')
+        for name in node_names:
             node = dict(data['nodes'][name])
             if isinstance(node.get('ca'), str):
                 node['ca'] = located(node['ca'])
@@ -152,6 +170,7 @@ class Queue:
 
     def __init__(self, path):
         self.lock = threading.Lock()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('PRAGMA synchronous=NORMAL')
@@ -180,13 +199,19 @@ class Relay:
     def __init__(self, config, queue_path):
         self.config = config
         self.ship = Client(config.nodes['ship'], config.origin)
-        self.shore = Client(config.nodes['shore'], config.origin)
-        # This worker has exactly one permission key for its lifetime:
-        # shore CSE + configured origin + anchor/events + CREATE + CIN (4).
-        self.events_parent = self.shore.root + '/anchor/events'
-        self.events_create_confirmed = False
-        self.sdt = LatestSDT(self.ship)
+        self.targets = {name: EventTarget(Client(node, config.origin))
+                        for name, node in config.nodes.items() if name != 'ship'}
         self.queue = Queue(queue_path)
+        self.active = 'shore'
+        self.changed_at = None
+        if config.handover is not None:
+            self.queue.db.execute('CREATE TABLE IF NOT EXISTS route (id INTEGER PRIMARY KEY, edge TEXT, changed REAL)')
+            row = self.queue.db.execute('SELECT edge, changed FROM route WHERE id=1').fetchone()
+            self.active, self.changed_at = row or (None, None)
+        self.location_error = None
+        self.last_store = {}
+        self.first_store_at = None
+        self.sdt = LatestSDT(self.ship)
         self.sources = {}  # container ri -> (device, sensor)
         self.stop = threading.Event()
         self.wake = threading.Event()
@@ -205,8 +230,11 @@ class Relay:
                 path = f'{self.ship.root}/{device}/{sensor}'
                 cnt = resource(self.ship.get(path))
                 found[cnt['ri']] = (device, sensor)
-                self.ship.ensure(path, 23, {'m2m:sub': {'rn': 'anchor-core', 'nu': [self.config.notify_url],
-                                                        'enc': {'net': [3]}, 'nct': 1}})
+                self.sources = {**self.sources, cnt['ri']: (device, sensor)}
+                sub = resource(self.ship.ensure(path, 23, {'m2m:sub': {'rn': 'anchor-core', 'nu': [self.config.notify_url],
+                                                        'enc': {'net': [3]}, 'nct': 1}}))
+                if sub.get('nu') != [self.config.notify_url]:
+                    self.ship.update(path + '/anchor-core', {'m2m:sub': {'nu': [self.config.notify_url]}})
         self.sources = found
         return found
 
@@ -237,22 +265,31 @@ class Relay:
         return bool(added)
 
     # ---- shore side ------------------------------------------------------------------------
-    def forward_record(self, rn, body):
-        try:
-            self.shore.create(self.events_parent, 4, {'m2m:cin': {'rn': rn, 'cnf': 'application/json:0', 'con': body}})
-        except OneM2MError as exc:
-            if exc.http_status in (401, 403) or exc.rsc in (4103, 4107, 5105):
-                self.events_create_confirmed = False
-            elif exc.rsc == 4105:
-                target = f'{self.events_parent}/{rn}'
-                stored = self.shore.get(target).get('m2m:cin', {})
-                if stored.get('con') != body:
-                    raise ValueError(f'Stored CIN content differs at {target}') from exc
-                return 'duplicates'
-            raise
-        if not self.events_create_confirmed:
-            self.events_create_confirmed = True
-        return 'forwarded'
+    @property
+    def shore(self):
+        return self.targets['shore'].client
+
+    @property
+    def events_create_confirmed(self):
+        return self.active is not None and self.targets[self.active].confirmed
+
+    def select_edge(self, edge, observed_at):
+        with self.lock:
+            if self.active == edge:
+                return
+            with self.queue.lock:
+                self.queue.db.execute('INSERT OR REPLACE INTO route VALUES (1, ?, ?)', (edge, observed_at))
+            self.active, self.changed_at = edge, observed_at
+            self.first_store_at = None
+            self.link = {'reachable': None, 'observedAt': None}
+        self.wake.set()
+        log('selected edge', edge, 'at', observed_at)
+
+    def forward_record(self, rn, body, destination=None):
+        selected = destination or self.active
+        if selected is None:
+            raise RuntimeError('Waiting for a coastal zone')
+        return self.targets[selected].send(rn, body)
 
     def forward_loop(self):
         pause = 0.5
@@ -266,16 +303,28 @@ class Relay:
                 if self.stop.is_set():
                     return
                 try:
-                    key = self.forward_record(rn, body)
+                    with self.lock:
+                        destination, changed = self.active, self.changed_at
+                    if destination is None:
+                        self.wake.wait(1)
+                        self.wake.clear()
+                        break
+                    key = self.forward_record(rn, body, destination)
                     self.queue.done(row_id)
                     with self.lock:
                         self.stats[key] += 1
-                        self.link = {'reachable': True, 'observedAt': time.time()}
+                        at = time.time()
+                        self.last_store[destination] = at
+                        if (destination, changed) == (self.active, self.changed_at):
+                            if self.first_store_at is None:
+                                self.first_store_at = at
+                            self.link = {'reachable': True, 'observedAt': at}
                     pause = 0.5
                 except Exception as exc:
                     with self.lock:
                         was = self.link['reachable']
-                        self.link = {'reachable': False, 'observedAt': time.time()}
+                        if (destination, changed) == (self.active, self.changed_at):
+                            self.link = {'reachable': False, 'observedAt': time.time()}
                         self.last_error = f'forward: {exc}'[:300]
                     if was is not False:
                         log('forward failed, keeping records queued:', str(exc)[:160])
@@ -287,10 +336,17 @@ class Relay:
         with self.lock:
             stats, link = dict(self.stats), dict(self.link)
             error, received = self.last_error, self.last_received
+            destination = self.active
+            handover = {'activeEdge': destination, 'changedAt': self.changed_at,
+                        'lastStoredAt': dict(self.last_store), 'firstStoredAt': self.first_store_at,
+                        'locationError': self.location_error}
         backlog = self.queue.size()
+        peer = 'edge' if self.config.handover is not None else 'shore'
+        counter = 'shoreStored' if peer == 'shore' else 'edgeStored'
         return {'role': 'ship', 'mode': 'relay', 'ready': bool(self.sources), 'lastReceivedAt': received,
-                'links': {'shore': {**link, 'pendingAtPeer': backlog}},
-                'delivery': {'accepted': stats['queued'], 'shoreStored': stats['forwarded'] + stats['duplicates'],
+                **({'handover': handover} if self.config.handover is not None else {}),
+                'links': {peer: {**link, 'pendingAtPeer': backlog}} if destination else {},
+                'delivery': {'accepted': stats['queued'], counter: stats['forwarded'] + stats['duplicates'],
                              'pending': backlog},
                 'relay': stats, 'lastError': error}
 
@@ -315,7 +371,7 @@ def make_server(relay, tokens):
 
         def do_GET(self):
             if self.path == '/health':
-                return self.send(200 if relay.sources else 503, {'ready': bool(relay.sources), 'role': 'ship'})
+                return self.send(200 if relay.sources else 503, {'ready': bool(relay.sources), 'role': relay.config.role})
             if self.path == '/status':
                 given = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
                 if not given or given not in tokens:
@@ -361,11 +417,12 @@ def check(relay):
                 print(f'  {device}/{sensor}: ok  {event["eventId"]}  -> {record_name(event["eventId"])}')
             except Exception as exc:
                 print(f'  {device}/{sensor}: {exc}')
-    try:
-        cnt = resource(relay.shore.get(f'{relay.shore.root}/anchor/events'))
-        print(f'  shore anchor/events reachable as {relay.shore.origin}: cni={cnt.get("cni")}')
-    except Exception as exc:
-        print(f'  shore: {exc}')
+    for name, target in relay.targets.items():
+        try:
+            cnt = resource(target.client.get(target.parent))
+            print(f'  {name} anchor/events reachable: cni={cnt.get("cni")}')
+        except Exception as exc:
+            print(f'  {name}: {exc}')
 
 
 def main(argv=None):
@@ -374,36 +431,45 @@ def main(argv=None):
     parser.add_argument('--check', action='store_true', help='read-only self test, then exit')
     args = parser.parse_args(argv)
     config = Config(args.config)
-    relay = Relay(config, ':memory:' if args.check else config.queue)
+    worker = EdgeForwarder if config.role == 'edge' else Relay
+    relay = worker(config, ':memory:' if args.check else config.queue)
     if args.check:
+        if config.role == 'edge':
+            for client in (relay.local, relay.target.client):
+                print(client.root, resource(client.get(client.root + '/anchor/events'))['ri'])
+            return
         return check(relay)
 
     httpd = make_server(relay, read_tokens(config))
     threading.Thread(target=httpd.serve_forever, kwargs={'poll_interval': 0.2}, daemon=True).start()
     threading.Thread(target=relay.forward_loop, daemon=True, name='forward').start()
 
-    threading.Thread(target=relay.sdt.run, args=(relay.stop,), daemon=True, name='sdt').start()
+    if config.handover is not None:
+        threading.Thread(target=watch_location, args=(relay,), daemon=True, name='mec013').start()
+    if config.role == 'ship':
+        threading.Thread(target=relay.sdt.run, args=(relay.stop,), daemon=True, name='sdt').start()
 
     def shutdown(*_):
         relay.stop.set()
-        relay.sdt.wake.set()
+        if config.role == 'ship':
+            relay.sdt.wake.set()
         relay.wake.set()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    log(f'relay listening on :{config.port}, queue {config.queue} ({relay.queue.size()} waiting)')
+    log(f'{config.role} relay listening on :{config.port}, state {config.queue}')
     announced = False
     while not relay.stop.is_set():
         try:
             found = relay.discover()  # re-checked every minute: a reset CSE gets its subscriptions back
             if not announced:
-                log(f'watching {len(found)} sensor containers, forwarding to {config.nodes["shore"].url}')
+                log(f'watching {len(found)} containers on {config.role}')
                 announced = True
         except Exception as exc:
-            log('ship CSE not ready:', str(exc)[:200])
+            log(config.role, 'CSE not ready:', str(exc)[:200])
         relay.stop.wait(60 if relay.sources else 3)
     httpd.shutdown()
-    log('stopped,', relay.queue.size(), 'records left in the queue')
+    log('stopped', config.role)
 
 
 if __name__ == '__main__':
