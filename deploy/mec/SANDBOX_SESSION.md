@@ -107,7 +107,7 @@ python3 deploy/mec/make_scenario.py /private/anchor-edge-mec.json /private/ancho
 - Measured 2026-11-19: Busan -> Kyushu switch, first store at coast B 0.23 s after the relay saw the zone change.
 - Known issue: the real ship relay also writes the same events straight to the real shore. The sandbox copy carries the mirror's `source.ri/ct`, so the shore answers "Stored CIN content differs" and the coast forwarder stops at that record. Fix by sending the real ship through the sandbox coast (one path), or give the sandbox stream its own vessel ID.
 
-## Shore = the real Pi 4 (since 2026-11-19)
+## Shore = the real Pi (since 2026-11-19)
 
 The sandbox no longer runs a shore. The edge core (`anchor-edge-app` on mep1) forwards to the **real shore Pi** at `https://100.98.242.10:8443/cse-in`.
 
@@ -130,4 +130,4 @@ The sandbox no longer runs a shore. The edge core (`anchor-edge-app` on mep1) fo
 | CSEs in the sandbox, HTTPS (ship mirror / coast A / coast B) | `:30082/cse-ship`, `:30080/cse-edge`, `:30084/cse-edge-b` |
 | Core APIs in the sandbox, HTTPS (ship / coast A / coast B) | `:30792`, `:30790`, `:30794` |
 | Real ship Pi (outside the sandbox) | ANCHOR CSE `https://100.114.83.111:8443/cse-ship`, core `https://100.114.83.111:8790`, legacy hardware CSE `http://100.114.83.111:8080/cse-ship` |
-| Real shore Pi 4 (outside the sandbox) | ANCHOR CSE `https://100.98.242.10:8443/cse-in`, core `https://100.98.242.10:8790`, legacy hardware CSE `http://100.98.242.10:8080/cse-in` |
+| Real shore Pi (outside the sandbox) | ANCHOR CSE `https://100.98.242.10:8443/cse-in`, core `https://100.98.242.10:8790`, legacy hardware CSE `http://100.98.242.10:8080/cse-in` |
