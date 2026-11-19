@@ -8,7 +8,7 @@ ANCHOR carries sensor readings from a ship to shore across intermittent coastal 
 
 In the MEC sandbox, the ship relay selects the Busan or Kyushu edge as the vessel moves. If the link drops, the relay queues new readings. Each edge finishes delivering the records it has accepted, even after the ship changes zones.
 
-![Three ESP32 nodes feed a shipboard Raspberry Pi 5. The ship relay selects the Busan or Kyushu edge, which forwards records to a second Raspberry Pi 5 on shore.](image/anchor-architecture.svg)
+![TR-0077 Option D architecture with the ship-001 twin, the anchor-fleet app on mep1, the Busan and Kyushu coastal relays, and the shore application.](image/anchor-tr-0077-option-d.png)
 
 <a id="역할별-배포와-실행"></a>
 
