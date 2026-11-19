@@ -19,3 +19,4 @@ deploy/**/*.local.ini
 *.pem
 **/api-token
 **/status-token
+deploy/mec/tokens.json
