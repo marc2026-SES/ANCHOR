@@ -61,7 +61,7 @@ export function TopologyMap({ link, inferred, m, held }: {
   return (
     <section className="panel tp">
       <header className="panel-head"><h3>Network</h3>
-        <span>three sensor nodes → ship → coast → shore, counts sit where the data sits, pulses mean records flowing</span></header>
+        <span>three sensor nodes → ship → MEC → shore, counts sit where the data sits, pulses mean records flowing</span></header>
       <svg viewBox="0 0 1180 238" className="tp-svg" role="img" aria-label="network diagram">
         {/* sensors → ship */}
         <Sensor x={92} y={LY - 58} title="BRIDGE S3" sub="attitude, GPS" />
@@ -79,10 +79,10 @@ export function TopologyMap({ link, inferred, m, held }: {
         <Node x={337} y={Y} title="SHIP Pi 5" sub="cse-ship, core"
           value={heldShip === null ? '—' : n(heldShip)} note="held on ship" />
         <LinkLine x1={412} x2={548} y={LY} id="A" state={link.A} inferred={inferred?.A} />
-        <Node x={623} y={Y} title="COAST MEC" sub="cse-edge, core"
+        <Node x={623} y={Y} title="MEC" sub="mep1 · cse-edge, core"
           value={waiting === null ? '—' : n(waiting)} note="waiting for B" />
         <LinkLine x1={698} x2={834} y={LY} id="B" state={link.B} inferred={inferred?.B} />
-        <Node x={909} y={Y} title="SHORE Pi 4" sub="cse-in, core, anchorAI copy"
+        <Node x={909} y={Y} title="SHORE" sub="cse-in, core, anchorAI copy"
           value={n(m.shoreConfirmed)} note="final receipts" />
         <path d={`M 984 ${LY} H 1038`} className="tp-feed" />
         <Node x={1108} y={Y + 8} w={136} h={58} title="DASHBOARD" sub="Shore Monitor AE" />

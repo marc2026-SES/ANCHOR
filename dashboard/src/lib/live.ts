@@ -75,7 +75,7 @@ export function buildFeed(events: Delivered[], links: LinkChange[], commands: Co
   for (const c of commands) {
     feed.push({ t: c.issuedAt, kind: 'command',
       text: `Command ${short(c.commandId)} issued, ${c.target} every ${c.intervalMs} ms for ${c.durationMs / 1000} s` })
-    if (c.cachedAtCoast !== null) feed.push({ t: c.cachedAtCoast, kind: 'command', text: `Command ${short(c.commandId)} stored at coast` })
+    if (c.cachedAtCoast !== null) feed.push({ t: c.cachedAtCoast, kind: 'command', text: `Command ${short(c.commandId)} stored at MEC` })
   }
   return feed
 }

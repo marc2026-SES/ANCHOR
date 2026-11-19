@@ -6,8 +6,8 @@ import { C } from '../theme'
 const W = 380, H = 150
 const NODES = [
   { id: 'ship', x: 52, title: 'Ship', sub: 'Pi 5, ship CSE' },
-  { id: 'coast', x: 190, title: 'Coast', sub: 'edge CSE, app' },
-  { id: 'shore', x: 328, title: 'Shore', sub: 'Pi 4, shore CSE' },
+  { id: 'coast', x: 190, title: 'MEC', sub: 'edge CSE, apps' },
+  { id: 'shore', x: 328, title: 'Shore', sub: 'IN-CSE' },
 ] as const
 const BW = 96, BH = 74, Y = 14
 
@@ -20,8 +20,8 @@ export function NetworkPanel({ link, m, mode, held }: {
   const ship = held ? held.ship : m.heldOnShip
   const coast = held ? held.coast : m.waitingAtCoast
   const counts: Record<string, [string, string]> = mode === 'anchor'
-    ? { ship: [held ? (ship === null ? '—' : n(m.generated)) : n(m.generated), ship === null ? 'no ship report' : `${n(ship)} not yet at coast`],
-        coast: [n(m.coastCustody), coast === null ? 'no coast report' : `${n(coast)} waiting for B`],
+    ? { ship: [held ? (ship === null ? '—' : n(m.generated)) : n(m.generated), ship === null ? 'no ship report' : `${n(ship)} not yet at MEC`],
+        coast: [n(m.coastCustody), coast === null ? 'no MEC report' : `${n(coast)} waiting for B`],
         shore: [n(m.shoreConfirmed), 'final receipts'] }
     : { ship: [n(m.generated), `${n(m.lost)} dropped`], coast: ['—', 'no custody'], shore: [n(m.shoreConfirmed), 'received'] }
   const line = (x1: number, x2: number, label: LinkId) => {
@@ -39,7 +39,7 @@ export function NetworkPanel({ link, m, mode, held }: {
   return (
     <section className="panel">
       <header className="panel-head"><h3>Where the data is</h3><span>A and B never need to be up together</span></header>
-      <svg viewBox={`0 0 ${W} ${H}`} className="net" role="img" aria-label="Ship, coast and shore with links A and B">
+      <svg viewBox={`0 0 ${W} ${H}`} className="net" role="img" aria-label="Ship, MEC and shore with links A and B">
         {line(NODES[0].x + BW / 2, NODES[1].x - BW / 2, 'A')}
         {line(NODES[1].x + BW / 2, NODES[2].x - BW / 2, 'B')}
         {NODES.map(nd => (
@@ -52,10 +52,10 @@ export function NetworkPanel({ link, m, mode, held }: {
           </g>
         ))}
         <text x={W / 2} y={H - 24} textAnchor="middle" fontSize="10" fill={C.muted}>
-          {mode === 'anchor' ? 'Coast custody and shore confirmation are separate receipts.' : 'Baseline forwards live only: no custody, no replay.'}
+          {mode === 'anchor' ? 'MEC custody and shore confirmation are separate receipts.' : 'Baseline forwards live only: no custody, no replay.'}
         </text>
         <text x={W / 2} y={H - 10} textAnchor="middle" fontSize="10" fill={C.muted}>
-          records generated on the ship, stored at the coast, confirmed at the shore
+          records generated on the ship, stored at the MEC, confirmed at the shore
         </text>
       </svg>
     </section>

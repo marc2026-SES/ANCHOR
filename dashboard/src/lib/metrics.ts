@@ -127,14 +127,14 @@ export function computeMetrics(events: Delivered[], links: LinkChange[], now: nu
   }
 }
 
-export type CommandStep = 'issued' | 'stored at coast' | 'at ship' | 'applied' | 'expired'
+export type CommandStep = 'issued' | 'stored at MEC' | 'at ship' | 'applied' | 'expired'
 
 /** where a shore command stands at `now`, from the steps observed so far */
 export function commandStep(c: Command, now: number): CommandStep {
   if (c.appliedAt !== null && c.appliedAt <= now) return 'applied'
   if (now >= c.expiresAt) return 'expired'
   if (c.deliveredToShip !== null && c.deliveredToShip <= now) return 'at ship'
-  if (c.cachedAtCoast !== null && c.cachedAtCoast <= now) return 'stored at coast'
+  if (c.cachedAtCoast !== null && c.cachedAtCoast <= now) return 'stored at MEC'
   return 'issued'
 }
 

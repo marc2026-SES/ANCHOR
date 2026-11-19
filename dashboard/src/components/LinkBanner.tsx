@@ -116,7 +116,7 @@ export function LinkBanner({ events, now, m, mode }: { events: Delivered[]; now:
   const text = a.phase === 'WAITING' ? ['Waiting for ship data', 'no record has reached the shore yet']
     : a.phase === 'OUTAGE' ? ['Nothing arriving at the shore', mode === 'anchor' ? 'the ship keeps collecting — records arrive when a path returns' : 'baseline: records generated now are being lost']
     : a.phase === 'CATCHING_UP' ? ['Held records coming in', `${n(a.lateRecent)} recovered in the last 8 s — the cut is being repaid`]
-    : ['Receiving live', 'records are flowing ship → coast → shore']
+    : ['Receiving live', 'records are flowing ship → MEC → shore']
   return (
     <section className={`panel link-banner ${a.phase.toLowerCase()}`} role="status">
       <header className="panel-head"><h3>{text[0]}</h3><span>{text[1]}</span>

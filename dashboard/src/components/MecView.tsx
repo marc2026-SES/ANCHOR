@@ -20,6 +20,10 @@ const fleetFacts = (v: Record<string, unknown>, skip: string[] = []) =>
     !['eventId', 'seenAt', 'at', 'redacted', 'ts', ...skip].includes(k) &&
     (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean'))
 
+/** the real vessel: the sim still calls it ship-001 — shown as the team name until the sim renames it */
+const SHIP_RE = /\b(ship-001|ctrl-sea)\b/i
+const nm = (v: unknown) => String(v ?? '—').replace(/ship-001/gi, 'ctrl-sea')
+
 const num = (v: unknown, d = 1) =>
   typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(d)) : String(v ?? '—')
 
@@ -29,13 +33,13 @@ function ConflictCell({ c }: { c: FleetConflict }) {
   const pill = lvl ? <span className={`pill ai-${lvl === 'danger' || lvl === 'critical' ? 'critical' : 'warn'}`}>{lvl}</span> : null
   if (c.type === 'fleet_conflict' && Array.isArray(c.pair)) {
     return <>{pill} <b className="cf-kind">collision risk</b>{' '}
-      <span className="ai-feature">vessels <em>{String(c.pair[0])} ↔ {String(c.pair[1])}</em></span>{' '}
+      <span className="ai-feature">vessels <em>{nm(c.pair[0])} ↔ {nm(c.pair[1])}</em></span>{' '}
       {c.cpaNm != null && <span className="ai-feature">CPA <em>{num(c.cpaNm)} nm</em></span>}{' '}
       {c.tcpaMin != null && <span className="ai-feature">TCPA <em>{num(c.tcpaMin, 0)} min</em></span>}</>
   }
   if (c.type === 'hazard_warning') {
     return <>{pill} <b className="cf-kind">{String(c.hazardType ?? 'hazard')}</b>{' '}
-      <span className="ai-feature">ship <em>{String(c.ship)}</em></span>{' '}
+      <span className="ai-feature">ship <em>{nm(c.ship)}</em></span>{' '}
       {c.hazardName != null && <span className="ai-feature">name <em>{String(c.hazardName)}</em></span>}{' '}
       {c.inside === true
         ? <span className="ai-feature">inside <em>now</em></span>
@@ -45,13 +49,13 @@ function ConflictCell({ c }: { c: FleetConflict }) {
   }
   if (c.type === 'route_deviation') {
     return <>{pill} <b className="cf-kind">off route</b>{' '}
-      <span className="ai-feature">ship <em>{String(c.ship)}</em></span>{' '}
+      <span className="ai-feature">ship <em>{nm(c.ship)}</em></span>{' '}
       {c.offRouteKm != null && <span className="ai-feature">off by <em>{num(c.offRouteKm)} km</em></span>}{' '}
       {c.modelVersion != null && <span className="ai-feature">model <em>v{String(c.modelVersion)}</em></span>}</>
   }
   return <>{pill}{' '}
     {fleetFacts(c, ['level']).map(([k, v]) => (
-      <span key={k} className="ai-feature">{k} <em>{String(v)}</em></span>
+      <span key={k} className="ai-feature">{k} <em>{nm(v)}</em></span>
     ))}</>
 }
 
@@ -73,7 +77,7 @@ function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: 
           <dl className="ai-facts">
             {s.ships != null && <div><dt>Vessels watched</dt><dd>{String(s.ships)}</dd></div>}
             {cp != null && <div><dt>Closest pair</dt>
-              <dd>{String(cp.a)} ↔ {String(cp.b)} · {num(cp.cpaNm)} nm / {num(cp.tcpaMin, 0)} min</dd></div>}
+              <dd>{nm(cp.a)} ↔ {nm(cp.b)} · {num(cp.cpaNm)} nm / {num(cp.tcpaMin, 0)} min</dd></div>}
             <div><dt>Route model</dt><dd>{rm != null ? `v${String(rm.version)} · ${String(rm.ships)} ships` : 'not trained yet'}</dd></div>
             {fleetFacts(s, ['ships']).slice(0, 3).map(([k, v]) => (
               <div key={k}><dt>{k}</dt><dd>{String(v)}</dd></div>
@@ -122,7 +126,7 @@ export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | 
           const hit = el?.closest?.('.leaflet-marker-icon, .leaflet-tooltip, .leaflet-popup, li, tr') ?? el
           const label = hit?.getAttribute?.('title') ?? hit?.getAttribute?.('alt') ??
             hit?.getAttribute?.('aria-label') ?? hit?.textContent ?? ''
-          if (label.length < 200 && /\bship-001\b/i.test(label)) window.top!.location.href = IN
+          if (label.length < 200 && SHIP_RE.test(label)) window.top!.location.href = IN
         }, true)
       } catch { /* not same-origin (direct map URL): leave the map alone */ }
     }
@@ -135,7 +139,7 @@ export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | 
       <header className="mec-head">
         <h1>ANCHOR <span>MEC dashboard</span></h1>
         <small>coastal fleet view — mep1 kr-busan · map, fleet AI, conflicts</small>
-        <a className="go-in" href={IN}>ship-001 (real) IN dashboard</a>
+        <a className="go-in" href={IN}>ctrl-sea (real) · IN dashboard</a>
       </header>
       <section className="panel map-embed mec-map">
         <header className="panel-head"><h3>Fleet map</h3>

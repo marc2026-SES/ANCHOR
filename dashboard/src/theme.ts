@@ -14,8 +14,8 @@ export const C = {
 }
 
 export const LINK: Record<LinkId, { name: string; short: string; color: string; band: string }> = {
-  A: { name: 'Link A (ship ↔ coast)', short: 'A ship↔coast', color: '#bd8c37', band: 'rgba(189,140,55,0.07)' },
-  B: { name: 'Link B (coast ↔ shore)', short: 'B coast↔shore', color: '#d9604f', band: 'rgba(217,96,79,0.07)' },
+  A: { name: 'Link A (ship ↔ MEC)', short: 'LINK A · ship↔MEC', color: '#bd8c37', band: 'rgba(189,140,55,0.07)' },
+  B: { name: 'Link B (MEC ↔ shore)', short: 'LINK B · MEC↔shore', color: '#d9604f', band: 'rgba(217,96,79,0.07)' },
 }
 
 /** dark HUD tooltip for every ECharts options object */

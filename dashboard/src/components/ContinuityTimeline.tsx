@@ -42,7 +42,7 @@ export function ContinuityTimeline(props: {
       series.push(
         { name: 'Held on ship', type: 'line', yAxisIndex: 1, showSymbol: false, step: 'end',
           lineStyle: { color: LINK.A.color, width: 1.6 }, itemStyle: { color: LINK.A.color }, data: onShip },
-        { name: 'Waiting at coast', type: 'line', yAxisIndex: 1, showSymbol: false, step: 'end',
+        { name: 'Waiting at MEC', type: 'line', yAxisIndex: 1, showSymbol: false, step: 'end',
           lineStyle: { color: LINK.B.color, width: 1.6 }, itemStyle: { color: LINK.B.color }, data: atCoast })
     }
     return {

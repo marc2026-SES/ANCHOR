@@ -40,7 +40,7 @@ export function StatusBar(props: {
       <LinkPill id="B" state={link.B} inferred={props.inferred?.B} />
       <div className="stat"><span>Last record at shore</span><b className={silence !== null && silence > 10_000 ? 'warn' : ''}>{fmtMs(silence)} ago</b></div>
       <div className="stat"><span>Held on ship</span><b>{heldOnShip === null ? '—' : <RollText text={n(heldOnShip)} />}</b></div>
-      <div className="stat"><span>Waiting at coast</span><b>{waitingAtCoast === null ? '—' : <RollText text={n(waitingAtCoast)} />}</b></div>
+      <div className="stat"><span>Waiting at MEC</span><b>{waitingAtCoast === null ? '—' : <RollText text={n(waitingAtCoast)} />}</b></div>
       <div className="stat"><span>Time (UTC)</span><b>{clock(now)}</b></div>
       {onMode ? (
         <div className="mode" role="group" aria-label="Mode">

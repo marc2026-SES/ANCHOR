@@ -24,7 +24,7 @@ export function KpiCards({ m, command, now }: { m: Metrics; command?: Command; n
   return (
     <div className="kpis">
       <Card label="Shore confirmed" value={`${pct.toFixed(pct > 99 && pct < 100 ? 1 : 0)}%`} bar={pct}
-        sub={`${n(m.shoreConfirmed)} of ${n(m.generated)}, coast ${n(m.coastCustody)}`} />
+        sub={`${n(m.shoreConfirmed)} of ${n(m.generated)}, MEC ${n(m.coastCustody)}`} />
       <Card label="Records lost" value={n(m.lost)}
         sub={`seq gaps now ${n(m.seqGaps)}, ${m.reboots ? `${m.reboots} reboot` : 'no reboot'}`}
         tone={m.lost === 0 ? 'good' : 'bad'} />

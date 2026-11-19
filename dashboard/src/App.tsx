@@ -237,7 +237,7 @@ function LiveBanner({ error, run }: { error: string | null; run: Run | null }) {
     error && `Shore monitor not reachable (${error}). Start server/shore_monitor.py.`,
     s && s.shore === false && 'The monitor cannot read the shore journal (address or ACP).',
     s && s.subscription === false && 'Subscription refused: the monitor scans every 2 s instead.',
-    s && s.coast === false && 'Coast journal not readable: hop A / B split and coast custody unknown.',
+    s && s.coast === false && 'MEC journal not readable: hop A / B split and MEC custody unknown.',
     run && !run.live && run.end && 'This run is closed.',
   ].filter(Boolean)
   if (!problems.length) return null
