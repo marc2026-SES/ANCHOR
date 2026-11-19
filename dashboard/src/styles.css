@@ -826,3 +826,13 @@ table.acp .grant .who { color: #c9dcea; }
 @media (max-width: 900px) { .mec-row { grid-template-columns: 1fr; } }
 
 .cf-kind { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; color: #d9e6ef; margin-right: 2px; }
+
+/* ── MEC federated-learning panel ────────────────────────────────────────── */
+.fl-top { display: flex; align-items: center; gap: 14px; padding: 6px 2px 10px; flex-wrap: wrap; }
+.fl-top small { color: var(--muted); }
+.fl-rounds { display: flex; gap: 6px; }
+.fl-dot { width: 14px; height: 14px; border-radius: 3px; background: rgba(126, 180, 214, 0.18);
+  border: 1px solid rgba(126, 180, 214, 0.3); }
+.fl-dot.training, .fl-dot.calibrating { background: rgba(95, 195, 239, 0.45); border-color: #5fc3ef; }
+.fl-dot.done { background: #2e9e63; border-color: #2e9e63; }
+.fl-dot.failed { background: #c0564a; border-color: #c0564a; }

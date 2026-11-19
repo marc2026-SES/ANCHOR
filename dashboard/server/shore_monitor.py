@@ -86,6 +86,8 @@ DEFAULTS = {
     'camera': {'url': '', 'timeout': 5, 'live_url': ''},
     # The coastal MEC map server, re-served under /map/ so the dashboard (https) can embed it. url empty = off.
     'map': {'url': '', 'timeout': 5},
+    # Federated-learning CSE (fl-cse): read-only view of task/rounds/models for the dashboard FL panel.
+    'fl': {'url': '', 'timeout': 5},
     # MEC-hosted copy only: where the "open the ship's IN dashboard" links point. Empty = same origin (/).
     'ui': {'in_url': ''},
 }
@@ -1246,7 +1248,7 @@ def notify_handler(monitor):
 
 # ── HTTP: dashboard API ──────────────────────────────────────────────────────
 
-def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, map_cfg=None):
+def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, map_cfg=None, fl_cfg=None):
     class Api(BaseHTTPRequestHandler):
         server_version = 'anchor-shore-monitor'
 
@@ -1325,6 +1327,37 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
             finally:
                 up.close()
 
+        def fl_view(self):
+            """GET /api/fl: compact view of the FL coordinator tree on the fl-cse (read-only)."""
+            if not (fl_cfg and fl_cfg.get('url')):
+                return self.reply(404, {'error': 'no fl cse configured'})
+            req = urllib.request.Request(fl_cfg['url'].rstrip('/') + '/flCoordinator?rcn=4',
+                                         headers={'X-M2M-Origin': 'CAnchorFL', 'X-M2M-RI': uuid.uuid4().hex[:10],
+                                                  'X-M2M-RVI': '4', 'Accept': 'application/json'})
+            try:
+                with urllib.request.urlopen(req, timeout=fl_cfg.get('timeout', 5)) as up:
+                    ae = json.loads(up.read().decode('utf-8', 'replace')).get('m2m:ae') or {}
+            except Exception as exc:
+                return self.reply(502, {'error': f'fl cse unreachable: {describe(exc)}'})
+            # several runs can share the CSE (fl_run.py --tag): show the running task, else the newest
+            tasks = ae.get('anchor:flTsk') or [{}]
+            task = next((t for t in tasks if t.get('fst') not in (None, 'done')), tasks[-1])
+            tag = (task.get('rn') or 'task-1').split('task-', 1)[-1]
+            cnts = {c.get('rn'): c.get('cni', 0) for c in ae.get('m2m:cnt') or []}
+            rounds = [x for x in ae.get('anchor:flRnd') or [] if (x.get('rn') or '').startswith(f'rnd-{tag}-')]
+            models = [x for x in ae.get('anchor:flMdl') or [] if (x.get('rn') or '').startswith(f'mdl-{tag}-')]
+            view = {
+                'task': {k: task.get(k) for k in ('tid', 'fst', 'rnds', 'minc', 'maxc', 'tpc', 'msp')},
+                'participants': [{k: x.get(k) for k in ('pid', 'prf', 'nsm', 'fst', 'hb')}
+                                 for x in ae.get('anchor:flPtc') or []],
+                'rounds': [{k: x.get(k) for k in ('rnd', 'fst', 'sel', 'rcv', 'mvr', 'why')}
+                           for x in sorted(rounds, key=lambda r: r.get('rnd') or 0)],
+                'models': [{k: x.get(k) for k in ('ver', 'rnd', 'ntr', 'pts')}
+                           for x in sorted(models, key=lambda r: r.get('rnd') or 0)],
+                'updates': cnts.get('updates', 0), 'calib': cnts.get('calib', 0),
+            }
+            return self.reply(200, view)
+
         def relay_map(self, url):
             """Pass one GET through to the MEC map server; the page lives under /map/ so its
             relative assets resolve back through this same route."""
@@ -1380,6 +1413,10 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
                 if not self.allowed():
                     return self.reply(401, {'error': 'unauthorized'})
                 return self.live()
+            if url.path == '/api/fl':
+                if not self.allowed():
+                    return self.reply(401, {'error': 'unauthorized'})
+                return self.fl_view()
             if url.path == '/map':
                 self.send_response(302)
                 self.send_header('Location', '/map/')
@@ -1511,10 +1548,10 @@ def serve(cfg):
     api_address = (cfg['api']['bind'], cfg['api']['port'])
     if cfg['api']['bind'] in ('127.0.0.1', 'localhost', '::1'):
         api = ThreadingHTTPServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
-                                               cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map']))  # loopback
+                                               cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map'], fl_cfg=cfg['fl']))  # loopback
     else:
         api = TLSServer(api_address, api_handler(monitor, token, cfg['dashboard_dir'],
-                                     cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map']),
+                                     cfg['api'].get('open', False), camera=cfg['camera'], map_cfg=cfg['map'], fl_cfg=cfg['fl']),
                         server_context(tls['cert'], tls['key']))
     servers = [api]
     if cfg['notify']['url']:

@@ -1,6 +1,6 @@
 // MEC (coastal) dashboard: the fleet-wide picture. The live map and fleet AI live here; clicking
 // through goes to the single-vessel IN-CSE dashboard (same app, same theme — this view is /?mec).
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FleetConflict, FleetInfo } from '../types'
 import { clock } from '../theme'
 import { fmtMs } from '../lib/metrics'
@@ -104,6 +104,72 @@ function FleetCard({ fleet, now, live }: { fleet: FleetInfo; now: number; live: 
   )
 }
 
+/** GET /api/fl — the FL coordinator tree on the fl-cse, relayed by the monitor (read-only) */
+interface FlView {
+  task?: { tid?: string; fst?: string; rnds?: number; minc?: number }
+  participants?: { pid: string; prf?: string; nsm?: number; fst?: string; hb?: string }[]
+  rounds?: { rnd: number; fst?: string; mvr?: string }[]
+  models?: { ver?: string; rnd?: number; ntr?: number; pts?: string }[]
+  updates?: number; calib?: number; error?: string
+}
+
+function FlCard({ live }: { live: boolean }) {
+  const [v, setV] = useState<FlView | null>(null)
+  useEffect(() => {
+    if (!live) return
+    let stop = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/fl', { cache: 'no-store' })
+        if (!stop) setV(r.ok ? await r.json() : null)
+      } catch { if (!stop) setV(null) }
+    }
+    tick()
+    const t = window.setInterval(tick, 5000)
+    return () => { stop = true; window.clearInterval(t) }
+  }, [live])
+  if (!live || !v?.task?.tid) return null // no fl-cse configured: no panel
+  const phase = v.task.fst === 'done' ? 'training complete'
+    : v.task.fst?.includes(':') ? `round ${v.task.fst.split(':')[0].slice(1)} · ${v.task.fst.split(':')[1]}`
+    : v.task.fst ?? '—'
+  const latest = v.models?.[v.models.length - 1]
+  const contributors = latest?.pts ? (JSON.parse(latest.pts) as string[]) : []
+  return (
+    <section className="panel">
+      <header className="panel-head"><h3>Federated learning</h3>
+        <span>fl-cse · model trees travel as CINs, sensor data never leaves the vessel</span></header>
+      <div className="fl-top">
+        <span className={`pill ${v.task.fst === 'done' ? 'ai-normal' : 'ai-link'}`}>{phase}</span>
+        <div className="fl-rounds">
+          {Array.from({ length: v.task.rnds ?? 0 }, (_, i) => {
+            const r = v.rounds?.find(x => x.rnd === i + 1)
+            return <i key={i} className={`fl-dot ${r?.fst ?? 'pending'}`} title={`round ${i + 1}: ${r?.fst ?? 'pending'}`} />
+          })}
+        </div>
+        <small>{n2(v.updates)} tree uploads · {n2(v.calib)} calibrations</small>
+      </div>
+      <dl className="ai-facts">
+        {latest && <div><dt>Global model</dt><dd>{latest.ver} · {latest.ntr} trees · {contributors.length} vessels</dd></div>}
+        <div><dt>Quorum</dt><dd>{v.task.minc ?? '—'} of {v.participants?.length ?? 0}</dd></div>
+      </dl>
+      {(v.participants?.length ?? 0) > 0 && (
+        <table className="ai-table">
+          <thead><tr><th>Participant</th><th>Local windows</th><th>State</th></tr></thead>
+          <tbody>
+            {v.participants!.map(pt => (
+              <tr key={pt.pid}><td>{nm(pt.pid)}<small>{pt.prf}</small></td>
+                <td>{pt.nsm ?? '—'}<small>stay local</small></td>
+                <td><span className={`pill ${pt.fst === 'uploaded' ? 'ai-normal' : pt.fst === 'failed' ? 'ai-critical' : 'ai-link'}`}>{pt.fst ?? '—'}</span></td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
+
+const n2 = (x?: number) => (x ?? 0).toLocaleString()
+
 export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | null; inUrl?: string | null; now: number; live: boolean }) {
   const IN = inUrl || '/'
   // The map is someone else's page, but it is relayed same-origin (/map/), so a click on anything
@@ -152,6 +218,7 @@ export function MecDashboard({ fleet, inUrl, now, live }: { fleet?: FleetInfo | 
         <section className="panel"><header className="panel-head"><h3>Fleet (coastal AI)</h3></header>
           <p className="empty">fleet.enabled is off in the monitor config.</p></section>
       )}
+      <FlCard live={live} />
     </div>
   )
 }

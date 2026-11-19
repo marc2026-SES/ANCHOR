@@ -1,0 +1,84 @@
+// ANCHOR FL — federated-learning flexContainer specializations (ACME CSE 정책 파일)
+// 사용법: anchor-anomaly.fcp와 같다. ACME init 디렉터리에 복사 후 CSE 재시작.
+// FL_PLAN.md 4장과 1:1 대응. 목록성 값(sbs, sel, rcv, pts, 선택 사유 등)은 JSON 문자열로 넣는다.
+// 같은 sname은 타입이 달라도 의미와 자료형을 통일했다 (pid, rnd, nsm, ddl, ntr, fst).
+[
+    {
+        "type"      : "anchor:flTsk",
+        "lname"     : "flTask",
+        "cnd"       : "edu.anchor.fl.task",
+        "attributes": [
+            { "sname" : "tid",  "lname" : "taskId",          "type" : "string",  "car" : "01" },
+            { "sname" : "mdl",  "lname" : "modelKind",       "type" : "string",  "car" : "01" },
+            { "sname" : "sbs",  "lname" : "subsystems",      "type" : "string",  "car" : "01" },
+            { "sname" : "rnds", "lname" : "totalRounds",     "type" : "integer", "car" : "01" },
+            { "sname" : "minc", "lname" : "minClients",      "type" : "integer", "car" : "01" },
+            { "sname" : "maxc", "lname" : "maxClients",      "type" : "integer", "car" : "01" },
+            { "sname" : "ddl",  "lname" : "deadlineSec",     "type" : "integer", "car" : "01" },
+            { "sname" : "tpc",  "lname" : "treesPerClient",  "type" : "integer", "car" : "01" },
+            { "sname" : "msp",  "lname" : "maxSamples",      "type" : "integer", "car" : "01" },
+            { "sname" : "fst",  "lname" : "flState",           "type" : "string",  "car" : "01" }
+        ]
+    },
+    {
+        "type"      : "anchor:flPtc",
+        "lname"     : "flParticipant",
+        "cnd"       : "edu.anchor.fl.participant",
+        "attributes": [
+            { "sname" : "pid",  "lname" : "participantId",   "type" : "string",  "car" : "01" },
+            { "sname" : "prf",  "lname" : "profile",         "type" : "string",  "car" : "01" },
+            { "sname" : "zn",   "lname" : "zoneId",          "type" : "string",  "car" : "01" },
+            { "sname" : "cpoa", "lname" : "currentPoa",      "type" : "string",  "car" : "01" },
+            { "sname" : "nsm",  "lname" : "numSamples",      "type" : "integer", "car" : "01" },
+            { "sname" : "dsp",  "lname" : "dataSpan",        "type" : "string",  "car" : "01" },
+            { "sname" : "lnk",  "lname" : "linkGrade",       "type" : "string",  "car" : "01" },
+            { "sname" : "fst",  "lname" : "flState",           "type" : "string",  "car" : "01" },
+            { "sname" : "hb",   "lname" : "lastHeartbeat",   "type" : "string",  "car" : "01" },
+            { "sname" : "lrd",  "lname" : "lastRound",       "type" : "integer", "car" : "01" }
+        ]
+    },
+    {
+        "type"      : "anchor:flRnd",
+        "lname"     : "flRound",
+        "cnd"       : "edu.anchor.fl.round",
+        "attributes": [
+            { "sname" : "rnd",  "lname" : "roundNumber",     "type" : "integer", "car" : "01" },
+            { "sname" : "fst",  "lname" : "flState",           "type" : "string",  "car" : "01" },
+            { "sname" : "sel",  "lname" : "selected",        "type" : "string",  "car" : "01" },
+            { "sname" : "ddl",  "lname" : "deadlineSec",     "type" : "integer", "car" : "01" },
+            { "sname" : "rcv",  "lname" : "received",        "type" : "string",  "car" : "01" },
+            { "sname" : "mvr",  "lname" : "modelVersion",    "type" : "string",  "car" : "01" },
+            { "sname" : "why",  "lname" : "reasons",         "type" : "string",  "car" : "01" }
+        ]
+    },
+    {
+        "type"      : "anchor:flUpd",
+        "lname"     : "flUpdate",
+        "cnd"       : "edu.anchor.fl.update",
+        "attributes": [
+            { "sname" : "pid",  "lname" : "participantId",   "type" : "string",  "car" : "01" },
+            { "sname" : "rnd",  "lname" : "roundNumber",     "type" : "integer", "car" : "01" },
+            { "sname" : "nsm",  "lname" : "numSamples",      "type" : "integer", "car" : "01" },
+            { "sname" : "ntr",  "lname" : "numTrees",        "type" : "integer", "car" : "01" },
+            { "sname" : "sz",   "lname" : "sizeBytes",       "type" : "integer", "car" : "01" },
+            { "sname" : "dur",  "lname" : "trainSeconds",    "type" : "float",   "car" : "01" },
+            { "sname" : "sha",  "lname" : "bodySha256",      "type" : "string",  "car" : "01" }
+        ]
+    },
+    {
+        "type"      : "anchor:flMdl",
+        "lname"     : "flModel",
+        "cnd"       : "edu.anchor.fl.model",
+        "attributes": [
+            { "sname" : "ver",  "lname" : "version",         "type" : "string",  "car" : "01" },
+            { "sname" : "rnd",  "lname" : "roundNumber",     "type" : "integer", "car" : "01" },
+            { "sname" : "ntr",  "lname" : "numTrees",        "type" : "integer", "car" : "01" },
+            { "sname" : "pts",  "lname" : "contributors",    "type" : "string",  "car" : "01" },
+            { "sname" : "f1",   "lname" : "f1Score",         "type" : "float",   "car" : "01" },
+            { "sname" : "prc",  "lname" : "precisionScore",  "type" : "float",   "car" : "01" },
+            { "sname" : "rcl",  "lname" : "recallScore",     "type" : "float",   "car" : "01" },
+            { "sname" : "dly",  "lname" : "detectDelaySec",  "type" : "float",   "car" : "01" },
+            { "sname" : "ref",  "lname" : "modelBodyRef",    "type" : "string",  "car" : "01" }
+        ]
+    }
+]
