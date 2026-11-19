@@ -1,0 +1,98 @@
+# ANCHOR AI — 실선박(ship) 프로필 설정
+# 팀 권한표(2026-11-16): AI 에이전트(CAnchorAgent)는 육상 IN-CSE에 붙어
+# ship-gw 복제 센서 트리를 구독한다. 합성 데모·평가는 기본 config.yaml 사용.
+# 사용: python analytics_ae.py --config config.ship.yaml
+#       python model_iforest.py train --profile ship --csv data/ship/train.csv --models-dir models-ship
+
+ship_id: ship-001
+sensor_profile: ship        # features.py PROFILES 선택 (실센서 키·주기·보간 허용)
+
+paths:
+  models_dir: models-ship   # 실데이터 학습 모델 (합성 models/ 와 분리)
+  eval_csv: data/ship/train.csv
+  events_json: data/eval/events.json    # baseline_rule용 — ship에선 미사용
+  results_json: results/baseline_ship.json
+
+onem2m:
+  cse_url: http://10.251.196.64:8080   # 육상 Pi4 (핫스팟 ms1234 기준 — 주소 바뀌면 교체)
+  cse_rn: cse-in
+  cse_id: /id-in
+  rvi: "3"                  # 팀 공통
+  ae:
+    rn: anchorAI
+    api: NanchorAI
+    originator: CAnchorAgent   # 팀 권한표 확정값
+  notification:             # 구독 모드용 (poll.enabled=false일 때만 사용)
+    host: 100.121.31.0      # 내 맥 Tailscale IP — 환경 바뀌면 교체 (바인드+poa 겸용)
+    port: 9999
+    path: /notify
+  ca_cert: certs/anchor-ca.pem   # 팀 CA (https 전환 시)
+  poll:                     # 폴링 수집 (선박과 같은 방식, 검증 완료)
+    enabled: true
+    interval_s: 5
+    # read_originator 제거됨 — ACP 승인(2026-11-18)으로 CAnchorAgent가 직접 읽음
+  sensors:                  # 육상에 복제된 실센서 트리 (anchor-sync가 생성)
+    - ship-gw/bridge/position
+    - ship-gw/bridge/attitude
+    - ship-gw/engine/vibration
+    - ship-gw/engine/gas
+    - ship-gw/cargo/climate
+    - ship-gw/cargo/hatch
+  anomaly:
+    rn: anomaly
+    cnd: edu.anchor.anomaly
+    key: anchor:anm
+    history_rn: history
+    skip_normal: true
+    fallback_container: true   # 육상 ACME에 fcp 미등록이면 container+CIN으로
+  summary:
+    rn: summary
+    period_s: 60
+  status:
+    rn: aiStatus              # 대시보드용 AI 상태 하트비트
+    period_s: 30
+  link_forecast:
+    container_rn: linkForecast
+  prognosis:
+    container_rn: prognosis
+  actuators:                # 실물 알람 액추에이터 없음 — 멤버 미생성이라 자동 비활성.
+    group_rn: grpAlarm      # (후속: critical 시 reportingGroup 보고주기 명령 연계 검토)
+    on_level: critical
+    members: []
+
+# ---- 실센서 잠정 임계값 (예지·규칙용) ----
+# 책상 위 정상: vib_rms_g ~0.009, mq2_v 0.21~0.23V(보정 안 됨), temp_c 28~30°C.
+# 실측 분포·데모 리허설 후 조정할 것. MQ-2는 전압이지 농도가 아님(팀 README).
+thresholds:
+  vib_rms_max: 0.30         # 두드림/모터 스파이크 관찰 후 조정
+  gas_v_max: 1.00           # MQ-2 전압 상한 (라이터 가스 반응 확인 후 조정)
+  cargo_temp_max_c: 35.0    # 실내 기준 — 손난로 데모 감안
+  roll_abs_max_deg: 20.0    # 기울임 데모용 (팀 기울기 사건 25°보다 먼저 경고)
+
+# ---- 링크 예측: 발표 범위 축소로 비활성 (2026-11-18 팀 결정 — 코드는 유지) ----
+link_forecast:
+  enabled: false
+  horizon_min: 30
+  step_s: 30
+  interval_s: 15
+  warn_min: 10
+  lte_cells:
+    - {name: busan,          lat: 35.08, lon: 129.06, radius_km: 45.0}
+    - {name: geoje,          lat: 34.88, lon: 128.60, radius_km: 45.0}
+    - {name: tsushima-north, lat: 34.66, lon: 129.45, radius_km: 30.0}
+    - {name: tsushima-south, lat: 34.18, lon: 129.26, radius_km: 30.0}
+    - {name: iki,            lat: 33.75, lon: 129.69, radius_km: 28.0}
+    - {name: fukuoka,        lat: 33.62, lon: 130.38, radius_km: 45.0}
+    - {name: shimonoseki,    lat: 33.95, lon: 130.93, radius_km: 40.0}
+
+# ---- 고장 예지: 실센서 채널 ----
+prognosis:
+  enabled: true
+  trend_min: 5
+  warn_min: 10
+  min_eta_s: 60
+  interval_s: 15
+  channels:
+    - {subsystem: ENGINE, container: vibration, key: vib_rms_g, threshold: vib_rms_max}
+    - {subsystem: ENGINE, container: gas,       key: mq2_v,     threshold: gas_v_max}
+    - {subsystem: CARGO,  container: climate,   key: temp_c,    threshold: cargo_temp_max_c}

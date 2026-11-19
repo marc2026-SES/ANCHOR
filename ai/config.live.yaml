@@ -1,0 +1,105 @@
+# ANCHOR AI — 선박 CSE 직결 라이브 (대시보드 연동용 임시 구성)
+# 육상 ACP·네트워크가 준비되기 전, 지금 접근 가능한 선박 CSE(piking)에 폴링으로
+# 붙어 AI 결과(anomaly·summary·prognosis·aiStatus)를 cse-ship/anchorAI 아래에 쓴다.
+# - 센서 읽기는 임시로 CAdmin (CAnchorAgent ACP 승인 후 read_originator 삭제)
+# - 구독 대신 폴링이라 선박 쪽 설정 변경이 전혀 필요 없음 (읽기 전용 + 우리 AE만 생성)
+# 사용: python analytics_ae.py --config config.live.yaml
+# 육상 전환 시에는 config.ship.yaml 사용.
+
+ship_id: ship-001
+sensor_profile: ship
+
+paths:
+  models_dir: models-ship
+
+onem2m:
+  cse_url: https://ship.local:8080      # 팀 표준 표기 (mDNS + TLS). ship.local은 같은
+                                        # LAN에서만 풀림 — 내 맥(Tailscale)에서 개발할 땐
+                                        # http://100.114.83.111:8080 으로 임시 교체
+  ca_cert: certs/anchor-ca.pem        # 팀 CA (ANCHOR Local Root CA, 2026-11-18 수령)
+  cse_rn: cse-ship
+  cse_id: /id-ship
+  rvi: "3"
+  ae:
+    rn: anchorAI
+    api: NanchorAI
+    originator: CAnchorAgent
+  notification:             # 폴링 모드라 미사용 (형식 유지)
+    host: 127.0.0.1
+    port: 9999
+    path: /notify
+  poll:
+    enabled: true
+    interval_s: 5
+    # read_originator 제거됨 — ACP 승인(2026-11-18)으로 CAnchorAgent가 직접 읽음
+  sensors:                  # 선박 CSE의 실센서 트리 (ESP32가 직접 쓰는 곳)
+    - bridge/position
+    - bridge/attitude
+    - engine/vibration
+    - engine/gas
+    - cargo/climate
+    - cargo/hatch
+  anomaly:
+    rn: anomaly
+    cnd: edu.anchor.anomaly
+    key: anchor:anm
+    history_rn: history
+    skip_normal: true
+    fallback_container: true   # 선박 ACME에 fcp 미등록 → container+CIN으로 자동 대체
+  summary:
+    rn: summary
+    period_s: 60
+  status:
+    rn: aiStatus
+    period_s: 30
+  link_forecast:
+    container_rn: linkForecast
+  prognosis:
+    container_rn: prognosis
+  actuators:                # 사이렌 fanOut: 발표 범위 축소로 미사용 (멤버 없음 = 비활성)
+    group_rn: grpAlarm
+    on_level: critical
+    members: []
+  readers:                  # 산출물 조회+디스커버리(acop 34)를 열어줄 originator
+    - CAnchorDashboard      # 예진 대시보드 (2026-11-20 요청)
+  mirror:                   # 결과 이중 기록 — 육상 복제본 (예진 대시보드 1순위 경로)
+    cse_url: http://100.96.155.4:30081   # seslab 육상 IN-CSE (보원 표)
+    cse_rn: cse-in
+    rvi: "3"
+  model_registry:           # 클라우드 학습→배포 루프 (tools/train_publish.py가 발행)
+    enabled: true           # cse_url 생략 시 미러(육상) CSE를 레지스트리로 사용
+    container_rn: modelRegistry
+    poll_s: 30
+
+thresholds:                 # 실센서 잠정값 (config.ship.yaml과 동일)
+  vib_rms_max: 0.30
+  gas_v_max: 1.00
+  cargo_temp_max_c: 35.0
+  roll_abs_max_deg: 20.0
+
+# 링크 예측: 발표 범위 축소로 비활성 (2026-11-18 팀 결정 — 코드는 유지)
+link_forecast:
+  enabled: false
+  horizon_min: 30
+  step_s: 30
+  interval_s: 15
+  warn_min: 10
+  lte_cells:
+    - {name: busan,          lat: 35.08, lon: 129.06, radius_km: 45.0}
+    - {name: geoje,          lat: 34.88, lon: 128.60, radius_km: 45.0}
+    - {name: tsushima-north, lat: 34.66, lon: 129.45, radius_km: 30.0}
+    - {name: tsushima-south, lat: 34.18, lon: 129.26, radius_km: 30.0}
+    - {name: iki,            lat: 33.75, lon: 129.69, radius_km: 28.0}
+    - {name: fukuoka,        lat: 33.62, lon: 130.38, radius_km: 45.0}
+    - {name: shimonoseki,    lat: 33.95, lon: 130.93, radius_km: 40.0}
+
+prognosis:
+  enabled: true
+  trend_min: 5
+  warn_min: 10
+  min_eta_s: 60
+  interval_s: 15
+  channels:
+    - {subsystem: ENGINE, container: vibration, key: vib_rms_g, threshold: vib_rms_max}
+    - {subsystem: ENGINE, container: gas,       key: mq2_v,     threshold: gas_v_max}
+    - {subsystem: CARGO,  container: climate,   key: temp_c,    threshold: cargo_temp_max_c}
