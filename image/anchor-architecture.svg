@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="276" viewBox="0 0 1000 276" role="img" aria-labelledby="title description">
+  <title id="title">ANCHOR ship-to-shore architecture</title>
+  <desc id="description">Three ESP32 nodes feed the ship's Raspberry Pi 5. The ship-001 relay in the ETSI MEC Sandbox receives mirrored records and selects either the Busan or Kyushu edge. Both deliver to the second Raspberry Pi 5 on shore, where the dashboard reads the records.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="6.5" refY="4" orient="auto"><path d="M1 1 7 4 1 7" fill="none" stroke="#21675f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <style>
+      text { font-family: 'Helvetica Neue', Arial, sans-serif; fill: #172f3c; }
+      .region { font-size: 14px; font-weight: 700; letter-spacing: 1.3px; fill: #21675f; }
+      .name { font-size: 21px; font-weight: 650; }
+      .detail { font-size: 16px; fill: #455f6c; }
+      .route { fill: none; stroke: #21675f; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+      .node { fill: white; stroke: #b6c9c6; stroke-width: 1.5; }
+    </style>
+  </defs>
+  <rect width="1000" height="276" fill="white"/>
+  <g fill="none" stroke="#d7e2e0"><path d="M28 52H252 M283 52H724 M754 52H972"/></g>
+  <g class="region"><text x="28" y="37">ON BOARD</text><text x="283" y="37">ETSI MEC SANDBOX</text><text x="754" y="37">ON SHORE</text></g>
+  <g class="route">
+    <path d="M140 118V155" marker-end="url(#arrow)"/>
+    <path d="M252 195H314" marker-end="url(#arrow)"/>
+    <path d="M464 195H486Q494 195 494 187V117Q494 109 502 109H520" marker-end="url(#arrow)"/>
+    <path d="M494 187V211Q494 219 502 219H520" marker-end="url(#arrow)"/>
+    <path d="M694 109H710Q718 109 718 117V187Q718 195 726 195H751" marker-end="url(#arrow)"/>
+    <path d="M694 219H710Q718 219 718 211V187"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="140" y="87" class="name">3 × ESP32</text>
+    <text x="140" y="110" class="detail">Bridge · Engine · Cargo</text>
+    <rect x="28" y="160" width="224" height="70" rx="9" fill="#edf6f3" stroke="#a9c8be"/>
+    <text x="140" y="190" class="name">Raspberry Pi 5</text>
+    <text x="140" y="214" class="detail">Ship gateway</text>
+    <rect x="317" y="160" width="147" height="70" rx="9" class="node"/>
+    <text x="390.5" y="190" class="name">Ship relay</text>
+    <text x="390.5" y="214" class="detail">ship-001</text>
+    <text x="283" y="180" font-size="14" fill="#455f6c">mirror</text>
+    <rect x="523" y="74" width="171" height="70" rx="9" class="node"/>
+    <text x="608.5" y="104" class="name">Busan edge</text>
+    <text x="608.5" y="128" class="detail">mep1</text>
+    <rect x="523" y="184" width="171" height="70" rx="9" class="node"/>
+    <text x="608.5" y="214" class="name">Kyushu edge</text>
+    <text x="608.5" y="238" class="detail">mep2</text>
+    <rect x="754" y="160" width="218" height="70" rx="9" fill="#edf6f3" stroke="#a9c8be"/>
+    <text x="863" y="190" class="name">Raspberry Pi 5</text>
+    <text x="863" y="214" class="detail">Shore event journal</text>
+    <text x="863" y="258" class="detail">Read by the dashboard</text>
+  </g>
+</svg>
