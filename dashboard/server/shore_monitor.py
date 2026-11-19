@@ -503,6 +503,8 @@ class JournalReader:
     ACME applies lim before the filter, so a paged cra query only ever looks at the oldest 100 records."""
 
     OVERLAP = 8  # child positions re-read before the tail (the list also holds a few non-CIN children)
+    WINDOW_TAIL = 40      # positions read from the end of a container that evicts (mni reached)
+    WINDOW_EVERY = 10.0   # seconds between those tail reads; notifications deliver the records meanwhile
 
     def __init__(self, cse, name, site, store, table, full_every, redact=True):
         self.cse, self.name, self.site, self.store, self.table = cse, name, site, store, table
@@ -510,6 +512,9 @@ class JournalReader:
         self.known, self.high = store.known(table, site)
         self.full_every, self.last_full = full_every, 0.0
         self.listed = set()  # refs seen in the CSE's current child list (not persisted)
+        self.lock = threading.Lock()  # scan loop and notification thread both store records
+        self.last_tail = 0.0
+        self.pushed = 0               # records stored straight from a notification
         self.source = Source(f'{site} anchor/{name}')
         self.rejected = []
         self.arrivals = collections.deque(maxlen=5000)  # local ms when a record first showed up at this site
@@ -518,13 +523,72 @@ class JournalReader:
     def path(self):
         return f'{self.cse.root}/anchor/{self.name}'
 
+    def ingest(self, ref, cin):
+        """Check and store one CIN (caller holds self.lock). Returns 1 when it was stored."""
+        if ref in self.known or cin.get('ty', 4) != 4:
+            return 0
+        stored = 0
+        at = ct_ms(cin['ct'])
+        try:
+            value = parse_con(cin)
+            if self.table == 'events':
+                check_event(value)
+                if self.redact and value.get('sensor') == 'position':
+                    value['payload'] = {k: v for k, v in value['payload'].items() if k not in POSITION_FIELDS}
+                    value['redacted'] = list(POSITION_FIELDS)
+                result = self.store.put_event(self.site, cin['ri'], at, value)
+                if result == 'conflict':
+                    raise ValueError('differs from the copy at the other site')
+                if result in ('new', 'copy'):
+                    self.arrivals.append(now_ms())
+            else:
+                check_command(value)
+                self.store.put_command(self.site, cin['ri'], at, value)
+            stored = 1
+        except (ValueError, KeyError, TypeError) as exc:
+            self.rejected = (self.rejected + [{'ri': cin.get('ri'), 'error': str(exc)[:200]}])[-20:]
+        self.known.add(ref)
+        self.high = at if self.high is None else max(self.high, at)
+        return stored
+
+    def accept(self, cin):
+        """A CIN delivered inside a notification (subscription nct=1). It is the resource the CSE just
+        stored, so it is kept as is; the periodic scan still compares the list with the container's cni
+        and reads anything a lost notification left out."""
+        if not isinstance(cin, dict) or not cin.get('ri') or not cin.get('ct') or 'con' not in cin:
+            return 0
+        ref = f"{self.cse.csi}/{cin['ri']}"
+        with self.lock:
+            stored = self.ingest(ref, cin)
+            self.listed.add(ref)
+            self.pushed += stored
+        if stored:
+            self.source.success(stored)
+        return stored
+
     def scan(self):
         try:
-            count = resource(self.cse.get(self.path)).get('cni', 0)
-            listed = self.listed
+            cnt = resource(self.cse.get(self.path))
+            count = cnt.get('cni', 0)
+            with self.lock:
+                listed = set(self.listed)
+            before = listed
+            # mni reached: the CSE drops the oldest record for every new one, so the count stays at mni
+            # while this reader has seen more. That is a rolling window, not a reset: between full
+            # passes read only the end of the list now and then (records arrive inside notifications).
+            due = time.monotonic() - self.last_full >= self.full_every
+            rolling = not due and type(cnt.get('mni')) is int and count >= cnt['mni']
+            if rolling:
+                if time.monotonic() - self.last_tail < self.WINDOW_EVERY:
+                    self.source.success(0)
+                    return 0
+                self.last_tail = time.monotonic()
+                refs = self.cse.discover(self.path, start=max(1, count - self.WINDOW_TAIL), ty=4, drt=2,
+                                         enough=lambda found: True)
+                listed = set(refs)  # only the window is tracked while it rolls
+                full = False
             # A count below what was listed means records were removed (or the CSE was reset).
-            full = count < len(listed) or time.monotonic() - self.last_full >= self.full_every
-            if full:
+            elif (full := count < len(listed) or time.monotonic() - self.last_full >= self.full_every):
                 refs = self.cse.discover(self.path, enough=lambda found: len(found) >= count, ty=4, drt=2) if count else []
                 listed = set(refs)
             else:
@@ -534,33 +598,15 @@ class JournalReader:
                 listed = listed | set(refs)
             added = 0
             for ref in refs:
-                if ref in self.known:
-                    continue
+                with self.lock:
+                    if ref in self.known:
+                        continue
                 cin = resource(self.cse.get(ref))
-                if cin.get('ty') != 4:
-                    continue
-                at = ct_ms(cin['ct'])
-                try:
-                    value = parse_con(cin)
-                    if self.table == 'events':
-                        check_event(value)
-                        if self.redact and value.get('sensor') == 'position':
-                            value['payload'] = {k: v for k, v in value['payload'].items() if k not in POSITION_FIELDS}
-                            value['redacted'] = list(POSITION_FIELDS)
-                        result = self.store.put_event(self.site, cin['ri'], at, value)
-                        if result == 'conflict':
-                            raise ValueError('differs from the copy at the other site')
-                        if result in ('new', 'copy'):
-                            self.arrivals.append(now_ms())
-                    else:
-                        check_command(value)
-                        self.store.put_command(self.site, cin['ri'], at, value)
-                    added += 1
-                except (ValueError, KeyError, TypeError) as exc:
-                    self.rejected = (self.rejected + [{'ri': cin.get('ri'), 'error': str(exc)[:200]}])[-20:]
-                self.known.add(ref)
-                self.high = at if self.high is None else max(self.high, at)
-            self.listed = listed
+                with self.lock:
+                    added += self.ingest(ref, cin)
+            with self.lock:
+                # keep what notifications added while this pass was running
+                self.listed = listed | (self.listed - before)
             if full:
                 self.last_full = time.monotonic()
             self.source.success(added)
@@ -621,14 +667,33 @@ class AiReader:
         cin = resource(body)
         return cin, parse_con(cin)
 
+    TAIL = 12  # list positions read from the end on an incremental pass
+
     def collect(self, name):
         path, key = f'{self.base}/{name}', (self.label, name)
         full = key not in self.high or time.monotonic() - self.last_full.get(key, 0) >= self.full_every
         filters = {'ty': 4, 'drt': 2}
-        if not full:
-            filters['cra'] = ms_ct(self.high[key] - 10_000)
         try:
-            refs = self.cse.discover(path, **filters)
+            count = None
+            if not full:
+                # Not createdAfter: ACME applies lim before the filter, so a paged cra query never
+                # reaches past the oldest 100 records. Read the last positions of the list instead.
+                rsc, body = self.cse.exchange('GET', path)
+                if 2000 <= rsc < 3000:
+                    info = resource(body)
+                    count = info.get('cni')
+                    # Nothing was added since the last pass (same count and state tag): skip the
+                    # discovery. Every listed record costs the CSE an ACP check.
+                    state = (count, info.get('st'))
+                    tails = self.__dict__.setdefault('_tail_state', {})
+                    if info.get('st') is not None and tails.get(key) == state:
+                        return
+                    tails[key] = state
+            if type(count) is int:
+                refs = self.cse.discover(path, start=max(1, count - self.TAIL), enough=lambda found: True,
+                                         **filters) if count else []
+            else:
+                refs = self.cse.discover(path, **filters)
         except OneM2MError as exc:
             if exc.rsc == 4004:
                 return
@@ -787,6 +852,29 @@ class AiReader:
                                 'ORDER BY ct_ms', (kind, start, upper)):
                 first.setdefault(r['event_id'], {**json.loads(r['body']), 'at': r['ct_ms']})
             out[kind] = sorted(first.values(), key=lambda v: -v['at'])[:200]
+        # The anomaly table shows one row per subsystem: its newest record (normal included, so a
+        # recovery replaces the alarm). The full list stays available as anomalyHistory.
+        out['anomalyHistory'] = out['anomaly']
+        newest = {}
+        for row in out['anomaly']:  # newest first
+            newest.setdefault(row.get('subsystem'), row)
+        order = ('ENGINE', 'CARGO', 'BRIDGE')
+        # aiStatus carries the current level of every subsystem. Where it says normal but the newest
+        # record is an older alarm (the AI restarted, or wrote no recovery record), or there is no
+        # record at all, show the status level instead, timed from when that level was first seen.
+        levels, seen = (self.status or {}).get('levels') or {}, self.status_seen
+        since = self.__dict__.setdefault('_level_since', {})
+        for sub in order:
+            level = levels.get(sub)
+            if not level or not seen or seen > upper:
+                continue
+            if since.get(sub, (None, 0))[0] != level:
+                since[sub] = (level, seen)
+            row, at = newest.get(sub), since[sub][1]
+            if row is None or (level == 'normal' and row.get('level') != 'normal' and row['at'] < at):
+                newest[sub] = {'eventId': f'status-{sub}-{level}-{at}', 'subsystem': sub, 'level': level,
+                               'score': 0.0, 'topFeatures': [], 'at': at, 'fromStatus': True}
+        out['anomaly'] = [newest[s] for s in order if s in newest] +                          [r for s, r in newest.items() if s not in order and s is not None]
         return out
 
 
@@ -1009,15 +1097,15 @@ class Monitor:
         ship, edge = self.core_status.get('ship'), self.core_status.get('edge')
         if ship and ship.get('delivery') and self.cores['ship'].ok:
             d = ship['delivery']
-            out.update(generated=d.get('accepted'), heldOnShip=max(0, d['accepted'] - d['coastCustody']),
+            out.update(generated=d.get('accepted'), heldOnShip=max(0, (d.get('accepted') or 0) - (d.get('coastCustody') or 0)),
                        shipAt=ship['at'])
         if edge and edge.get('delivery') and self.cores['edge'].ok:
             d = edge['delivery']
-            out.update(atCoast=d.get('accepted'), waitingAtCoast=max(0, d['accepted'] - d['shoreConfirmed']),
+            out.update(atCoast=d.get('accepted'), waitingAtCoast=max(0, (d.get('accepted') or 0) - (d.get('shoreConfirmed') or 0)),
                        edgeAt=edge['at'])
         elif ship and ship.get('delivery') and self.cores['ship'].ok:
             d = ship['delivery']  # the ship learns shore receipts later, through the coast
-            out.update(waitingAtCoast=max(0, d['coastCustody'] - d['shoreConfirmed']))
+            out.update(waitingAtCoast=max(0, (d.get('coastCustody') or 0) - (d.get('shoreConfirmed') or 0)))
         return out or None
 
     # loops ---------------------------------------------------------------------
@@ -1217,6 +1305,24 @@ def run_view(monitor, run_id=None, after=0):
 # ── HTTP: notifications from the CSE ─────────────────────────────────────────
 
 def notify_handler(monitor):
+    # The CSE waits for this response (its request timeout is 3 s) and holds a worker for it, so the
+    # handler only queues the record. Storing it (SQLite on the SD card) happens on this thread.
+    import queue
+    pending = queue.SimpleQueue()
+
+    def drain():
+        while True:
+            cin = pending.get()
+            try:
+                stored = monitor.readers['shore'][0].accept(cin)
+            except Exception as exc:
+                log.debug('notification not stored: %s', exc)
+                stored = 0
+            if not stored:
+                monitor.wake.set()  # no usable record in the body: let the scan read it from the CSE
+
+    threading.Thread(target=drain, daemon=True, name='notify-store').start()
+
     class Notify(BaseHTTPRequestHandler):
         server_version = 'anchor-shore-monitor'
 
@@ -1234,7 +1340,7 @@ def notify_handler(monitor):
                 monitor.subscription.ok = False  # deleted at the CSE: recreate on the next pass
             if not sgn.get('vrq'):
                 monitor.notifications += 1
-                monitor.wake.set()  # a hint only: the shore loop reads the new records from the CSE now
+                pending.put(((sgn.get('nev') or {}).get('rep') or {}).get('m2m:cin'))
             self.send_response(200)
             self.send_header('X-M2M-RSC', '2000')
             if self.headers.get('X-M2M-RI'):
@@ -1398,9 +1504,12 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
             self.send_header('Cache-Control', 'no-cache, private')
             self.end_headers()
             try:
-                while chunk := up.read(2048):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                # Line by line: read(2048) waits for 2 KB, about one second of 20 Hz samples, and the
+                # hull then moves once a second. An SSE event ends with a blank line.
+                while line := up.readline():
+                    self.wfile.write(line)
+                    if not line.strip():
+                        self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
@@ -1450,6 +1559,7 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
                     return self.reply(200, run_view(monitor, q.get('run'), int(q.get('after', 0))))
                 return self.reply(404, {'error': 'not found'})
             except KeyError:
+                log.exception('run view failed')  # a KeyError inside the view is not an unknown run
                 return self.reply(404, {'error': 'unknown run'})
             except ValueError as exc:
                 return self.reply(400, {'error': str(exc)})
