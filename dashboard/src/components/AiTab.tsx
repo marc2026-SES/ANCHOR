@@ -246,10 +246,10 @@ export function AiTab({ ai, fleet, now, live }: { ai: AiInfo | null | undefined;
     <div className="tab-body ai">
       <div className="ai-top">
         <StatusCard ai={ai} now={now} live={live} />
-        <Forecasts ai={ai} now={now} />
+        {fleet ? <FleetCard fleet={fleet} now={now} live={live} /> : <Forecasts ai={ai} now={now} />}
       </div>
+      {fleet && <Forecasts ai={ai} now={now} />}
       <AnomalyTable rows={ai.anomaly.filter(a => a.at <= now)} now={now} />
-      {fleet && <FleetCard fleet={fleet} now={now} live={live} />}
       <SummaryTable ai={ai} />
     </div>
   )
