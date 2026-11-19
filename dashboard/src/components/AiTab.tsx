@@ -52,26 +52,41 @@ const activePrognoses = (ai: AiInfo, now: number) =>
 const recentCritical = (ai: AiInfo, now: number) =>
   ai.anomaly.filter(a => a.level === 'critical' && a.at <= now && now - a.at < 120_000)
 
-/** strip above the tabs: a predicted threshold still ahead, or a critical anomaly in the last 2 minutes */
+/** desktop-style toasts, top right: a predicted threshold still ahead, or a critical anomaly in the
+ * last 2 minutes. Dismissable; at most 3 at once, the rest fold into a counter that opens the AI tab. */
 export function AiAlerts({ ai, now, onOpen }: { ai: AiInfo | null | undefined; now: number; onOpen: () => void }) {
+  const [dismissed, setDismissed] = useState<string[]>([])
   if (!ai) return null
-  const prog = activePrognoses(ai, now)
-  const crit = recentCritical(ai, now)
-  if (!prog.length && !crit.length) return null
+  const prog = activePrognoses(ai, now).filter(p => !dismissed.includes(p.eventId))
+  const crit = recentCritical(ai, now).filter(a => !dismissed.includes(a.eventId))
+  const total = prog.length + crit.length
+  if (!total) return null
+  const hide = (id: string) => setDismissed(d => [...d.slice(-40), id])
+  const shownProg = prog.slice(0, 3)
+  const shownCrit = crit.slice(0, Math.max(0, 3 - shownProg.length))
   return (
-    <div className="ai-alerts" role="status">
-      {prog.map(p => (
-        <button key={p.eventId} className="ai-alert prog" onClick={onOpen}>
-          <b>AI forecast</b> {channelLabel(p.channel)} reaches {p.threshold ?? 'its limit'} in <b>{mmss(p.at + p.etaS * 1000 - now)}</b> at this trend
-          {p.slopePerMin !== undefined && <small> ({p.slopePerMin > 0 ? '+' : ''}{p.slopePerMin}/min, now {p.value})</small>}
-        </button>
+    <div className="toasts" role="status">
+      {shownProg.map(p => (
+        <div key={p.eventId} className="toast prog">
+          <button className="toast-x" aria-label="dismiss" onClick={() => hide(p.eventId)}>×</button>
+          <button className="toast-body" onClick={onOpen}>
+            <b>AI forecast</b> {channelLabel(p.channel)} reaches {p.threshold ?? 'its limit'} in <b>{mmss(p.at + p.etaS * 1000 - now)}</b> at this trend
+            {p.slopePerMin !== undefined && <small> ({p.slopePerMin > 0 ? '+' : ''}{p.slopePerMin}/min, now {p.value})</small>}
+          </button>
+        </div>
       ))}
-      {crit.map(a => (
-        <button key={a.eventId} className="ai-alert crit" onClick={onOpen}>
-          <b>AI anomaly</b> {a.subsystem} critical, score {a.score.toFixed(2)}
-          {a.topFeatures?.[0] && <small>, {featureLabel(a.topFeatures[0].feature)}</small>}, {fmtMs(now - a.at)} ago
-        </button>
+      {shownCrit.map(a => (
+        <div key={a.eventId} className="toast crit">
+          <button className="toast-x" aria-label="dismiss" onClick={() => hide(a.eventId)}>×</button>
+          <button className="toast-body" onClick={onOpen}>
+            <b>AI anomaly</b> {a.subsystem} critical, score {a.score.toFixed(2)}
+            {a.topFeatures?.[0] && <small>, {featureLabel(a.topFeatures[0].feature)}</small>}, {fmtMs(now - a.at)} ago
+          </button>
+        </div>
       ))}
+      {total > 3 && (
+        <button className="toast more" onClick={onOpen}>+{total - 3} more on the AI tab</button>
+      )}
     </div>
   )
 }
