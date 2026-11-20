@@ -319,8 +319,10 @@ class Rerouter:
         self.state.write_text(json.dumps(self.moved, ensure_ascii=False), encoding="utf-8")
         self.changed_file.write_text(json.dumps(self.changed), encoding="utf-8")
 
-    def _post(self, ship_id: str, path: list, eop=None, velocity=None, allow_land: bool = False):
-        body = {"path": path, "by": "fleet-ai"}
+    def _post(self, ship_id: str, path: list, eop=None, velocity=None, allow_land: bool = False,
+              tag: str = "avoid"):
+        # by 꼬리표로 지도가 상태를 구분한다: avoid(회피 경로) / return(원래 항로로 돌아가는 중) / restore(원래 경로)
+        body = {"path": path, "by": f"fleet-ai:{tag}"}
         if allow_land:
             body["allowLand"] = True
         if eop:
@@ -401,7 +403,7 @@ class Rerouter:
         새 경로가 아니라 시나리오의 원래 경로를 되돌리는 것이므로."""
         path = st["path"] if st.get("returning", 0) == 0 else st["path"][::-1]
         for allow in (False, True):
-            if self._post(sid, path, st["eopMode"], st["velocity"], allow_land=allow).status_code == 200:
+            if self._post(sid, path, st["eopMode"], st["velocity"], allow_land=allow, tag="restore").status_code == 200:
                 return True
         return False
 
@@ -437,7 +439,7 @@ class Rerouter:
                     else:
                         k = max(seg - step, 0)
                         back, end = path[k::-1], 0
-                    if self._post(sid, back, "REVERSE", st["velocity"], allow_land=allow).status_code == 200:
+                    if self._post(sid, back, "REVERSE", st["velocity"], allow_land=allow, tag="return").status_code == 200:
                         st["returning"], st["return_since"] = end, time.time()
                         self._save()
                         print(f"원래 항로로 복귀 시작: {sid} (경유점 {k}번으로 합류해 "
@@ -485,7 +487,8 @@ def setup_cse(args) -> OneM2MClient | None:
     if not args.cse_url:
         return None
     try:
-        c = OneM2MClient(args.cse_url, args.cse_rn, args.cse_originator, rvi="3", timeout=8)
+        c = OneM2MClient(args.cse_url, args.cse_rn, args.cse_originator, rvi="3", timeout=8,
+                         ca=args.cse_ca or True)
         c.ensure_ae("fleetAI", "NanchorFleet")
         c.ensure_container("fleetAI", "conflicts", mni=500)
         c.ensure_container("fleetAI", "fleetStatus", mni=200)
@@ -968,7 +971,9 @@ def main() -> None:
     ap.add_argument("--zone-map", default="mep1=kr-busan,mep2=jp-kyushu",
                     help="역할=zoneId 매핑 (나머지 구역은 cloud 담당)")
     ap.add_argument("--cse-url", default=None,
-                    help="결과 CIN을 쓸 연안 CSE (예: http://100.96.155.4:30080)")
+                    help="결과 CIN을 쓸 연안 CSE (예: https://100.96.155.4:30080)")
+    ap.add_argument("--cse-ca", default=None,
+                    help="연안 CSE가 HTTPS일 때 검증에 쓸 CA 인증서 경로 (샌드박스 CA)")
     ap.add_argument("--cse-rn", default="cse-edge")
     ap.add_argument("--cse-originator", default="CAnchorAgent")
     ap.add_argument("--readers", default="CAnchorDashboard",

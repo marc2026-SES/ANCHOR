@@ -72,14 +72,35 @@ class Map:
 
 
 def straight_leg(u: dict, hx: float, hy: float) -> float:
-    """지금 침로 그대로 다음 경유점까지 남은 거리 km (직선 구간 위가 아니면 0)."""
-    pos, best = u["location"]["coordinates"], 0.0
-    for w in u["path"]["coordinates"]:
-        d = km(pos, w)
-        dx = (w[0] - pos[0]) * 111.32 * math.cos(math.radians(pos[1]))
-        dy = (w[1] - pos[1]) * 110.57
-        if d > 1.0 and (dx * hx + dy * hy) / d > 0.999:
-            best = d if best == 0.0 else min(best, d)
+    """지금 달리고 있는 경로 구간의 끝 경유점까지 남은 거리 km (구간 위가 아니면 0).
+
+    경유점 방향만 보면 안 된다. 경유점 바로 위에서 짧게 꺾이는 순간에는 그 방향으로 멀리 있는 다른
+    경유점이 '다음 경유점'처럼 보여, 배가 가지 않는 구간에 표류선을 세우게 된다. 그래서 배가 실제로
+    올라타 있는 구간(가까이 있고 침로가 구간 방향과 같은 것)을 찾아 그 구간의 끝까지만 잰다.
+    """
+    pos, pts = u["location"]["coordinates"], u["path"]["coordinates"]
+    kx = 111.32 * math.cos(math.radians(pos[1]))
+    pairs = [(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+    if u.get("eopMode") == "LOOP" and len(pts) > 2:
+        pairs.append((pts[-1], pts[0]))
+    best = 0.0
+    for a, b in pairs:
+        sx, sy = (b[0] - a[0]) * kx, (b[1] - a[1]) * 110.57
+        seg = math.hypot(sx, sy)
+        if seg < 1.0:
+            continue
+        px, py = (pos[0] - a[0]) * kx, (pos[1] - a[1]) * 110.57
+        t = (px * sx + py * sy) / (seg * seg)
+        if not -0.02 <= t <= 1.02 or math.hypot(px - t * sx, py - t * sy) > 0.5:
+            continue                                   # 이 구간 위에 있지 않다
+        along = (sx * hx + sy * hy) / seg
+        if along > 0.999:
+            left = (1.0 - t) * seg                     # 구간 방향으로 가는 중 → 끝점 b까지
+        elif along < -0.999:
+            left = t * seg                             # 되돌아가는 중(REVERSE) → 시작점 a까지
+        else:
+            continue
+        best = left if best == 0.0 else min(best, left)
     return best
 
 
