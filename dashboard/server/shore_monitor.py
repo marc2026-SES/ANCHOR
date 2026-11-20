@@ -24,6 +24,7 @@ import collections
 import copy
 import hmac
 import ipaddress
+import gzip
 import json
 import mimetypes
 import os
@@ -1370,9 +1371,14 @@ def api_handler(monitor, token, dashboard_dir='', open_api=False, camera=None, m
 
         def reply(self, code, value):
             data = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+            gz = len(data) > 8_192 and 'gzip' in (self.headers.get('Accept-Encoding') or '')
+            if gz:
+                data = gzip.compress(data, 6)
             self.send_response(code)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Cache-Control', 'no-store')
+            if gz:
+                self.send_header('Content-Encoding', 'gzip')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)

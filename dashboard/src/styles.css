@@ -836,3 +836,60 @@ table.acp .grant .who { color: #c9dcea; }
 .fl-dot.training, .fl-dot.calibrating { background: rgba(95, 195, 239, 0.45); border-color: #5fc3ef; }
 .fl-dot.done { background: #2e9e63; border-color: #2e9e63; }
 .fl-dot.failed { background: #c0564a; border-color: #c0564a; }
+
+/* ── AI toasts, louder: tinted wash + glow so a critical can't be missed ──── */
+.toast { border-width: 1.5px; }
+.toast .toast-body { font-size: 13.5px; }
+.toast .toast-body b { font-size: 14.5px; letter-spacing: 0.02em; }
+.toast.crit { background: linear-gradient(90deg, rgba(122, 34, 26, 0.6), rgba(8, 22, 36, 0.96) 60%);
+  border-color: rgba(226, 116, 95, 0.95);
+  box-shadow: 0 10px 28px rgba(3, 9, 14, 0.6), 0 0 20px rgba(217, 96, 79, 0.4);
+  animation: toast-in 0.25s ease-out, crit-pulse 1.4s ease-in-out 3; }
+@keyframes crit-pulse { 50% { box-shadow: 0 10px 28px rgba(3, 9, 14, 0.6), 0 0 34px rgba(217, 96, 79, 0.75); } }
+.toast.prog { background: linear-gradient(90deg, rgba(104, 76, 20, 0.5), rgba(8, 22, 36, 0.96) 60%);
+  border-color: rgba(224, 179, 90, 0.85); }
+
+/* CRITICAL tag inside toasts: unmissable, with a pulsing beacon */
+.toast .toast-tag { display: inline-flex; align-items: center; gap: 6px; background: #d9604f; color: #0a1420;
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.1em; padding: 2px 9px; margin-right: 7px;
+  vertical-align: 1px; clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px)); }
+.toast .toast-tag i { width: 7px; height: 7px; border-radius: 50%; background: #fff;
+  animation: tag-blink 1s steps(2, start) infinite; }
+.toast.crit { animation: toast-in 0.25s ease-out, crit-pulse 2s ease-in-out infinite; }
+@keyframes tag-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .toast .toast-tag i { animation: none; } }
+
+/* ── toast, take 2: the outline follows the chamfer (two clipped layers), and the glow
+   uses drop-shadow so it survives the clip; CRITICAAL chip goes quiet-luxury ─────────── */
+.toast { border: 0; padding: 0; backdrop-filter: none; -webkit-backdrop-filter: none;
+  background: rgba(126, 180, 214, 0.4); box-shadow: none;
+  filter: drop-shadow(0 10px 22px rgba(3, 9, 14, 0.65)); }
+.toast::before { content: ''; position: absolute; inset: 1.5px; z-index: 0;
+  background: rgba(8, 22, 36, 0.97);
+  clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 11px 100%, 0 calc(100% - 11px)); }
+.toast > * { position: relative; z-index: 1; }
+.toast.crit { background: linear-gradient(135deg, rgba(226, 116, 95, 0.95), rgba(122, 44, 34, 0.9));
+  animation: toast-in 0.25s ease-out, crit-pulse 2.2s ease-in-out infinite; }
+.toast.crit::before { background: linear-gradient(100deg, rgba(104, 30, 23, 0.6), rgba(8, 22, 36, 0.97) 55%); }
+.toast.prog { background: linear-gradient(135deg, rgba(224, 179, 90, 0.9), rgba(104, 74, 24, 0.9)); }
+.toast.prog::before { background: linear-gradient(100deg, rgba(88, 64, 18, 0.5), rgba(8, 22, 36, 0.97) 55%); }
+.toast.more { background: rgba(95, 195, 239, 0.45); padding: 5px 14px; }
+@keyframes crit-pulse { 50% { filter: drop-shadow(0 10px 22px rgba(3, 9, 14, 0.65)) drop-shadow(0 0 14px rgba(217, 96, 79, 0.55)); } }
+.toast .toast-tag { background: rgba(217, 96, 79, 0.12); color: #ff9d8a; border: 1px solid rgba(226, 116, 95, 0.55);
+  clip-path: none; border-radius: 3px; padding: 1.5px 8px 2px; font-weight: 750; letter-spacing: 0.14em; }
+.toast .toast-tag i { background: #ff8d7a; animation: tag-breathe 1.6s ease-in-out infinite; }
+@keyframes tag-breathe { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .toast.crit { animation: none; } }
+.toast.prog { background: linear-gradient(135deg, rgba(224, 179, 90, 0.65), rgba(104, 74, 24, 0.7)); }
+.toast.prog::before { background: linear-gradient(100deg, rgba(74, 54, 16, 0.38), rgba(8, 22, 36, 0.97) 48%); }
+.toast.more span { position: relative; z-index: 1; }
+
+/* toast final: solid deep-red fill, uniform border; CRITICAL chip filled for contrast */
+.toast.crit { background: rgba(226, 116, 95, 0.8); }
+.toast.crit::before { background: #3a2429; }
+.toast .toast-tag { background: #d9604f; color: #16100e; border: 0; font-size: 12px; padding: 2.5px 10px; }
+.toast .toast-tag i { background: #16100e; opacity: 0.85; }
+
+/* toast critical: brand red, darkened for legibility (B2) */
+.toast.crit { background: #e2745f; }
+.toast.crit::before { background: #7c2726; }

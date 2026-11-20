@@ -19,8 +19,10 @@ type Phase = 'WAITING' | 'ONLINE' | 'OUTAGE' | 'CATCHING_UP'
 function analyse(events: Delivered[], now: number, backlog: number) {
   const t0 = now - WIN
   const arrivals: number[] = []
+  const inWindow: Delivered[] = [] // generated inside the strip window — all a recovery check can need
   let lateRecent = 0, lastArrival = -1
   for (const e of events) {
+    if (e.generatedAt >= t0 && e.shoreAt !== null && e.shoreAt <= now) inWindow.push(e)
     if (e.shoreAt === null || e.shoreAt > now) continue
     if (e.shoreAt > lastArrival) lastArrival = e.shoreAt
     if (e.shoreAt >= t0) arrivals.push(e.shoreAt)
@@ -38,8 +40,8 @@ function analyse(events: Delivered[], now: number, backlog: number) {
   // a completed gap is "recovered" when records generated inside it did reach the shore afterwards
   for (const b of bands) {
     if (b.live) continue
-    for (const e of events) {
-      if (e.generatedAt >= b.a && e.generatedAt <= b.b && e.shoreAt !== null && e.shoreAt <= now && e.shoreAt >= b.b - 2_000) b.recovered++
+    for (const e of inWindow) {
+      if (e.generatedAt >= b.a && e.generatedAt <= b.b && e.shoreAt! >= b.b - 2_000) b.recovered++
     }
   }
   const age = lastArrival < 0 ? null : now - lastArrival

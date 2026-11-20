@@ -59,13 +59,29 @@ export function AiAlerts({ ai, now, onOpen }: { ai: AiInfo | null | undefined; n
   if (!ai) return null
   const prog = activePrognoses(ai, now).filter(p => !dismissed.includes(p.eventId))
   const crit = recentCritical(ai, now).filter(a => !dismissed.includes(a.eventId))
-  const total = prog.length + crit.length
+  // a subsystem whose CURRENT status is critical keeps a sticky toast up until it clears —
+  // an alarm that only fires on the escalation event goes quiet while the problem persists
+  const ongoing = (['ENGINE', 'BRIDGE', 'CARGO'] as const)
+    .filter(sub => ai.status?.levels?.[sub] === 'critical' && !crit.some(a => a.subsystem === sub))
+    .map(sub => ({ sub, since: ai.anomaly.find(a => a.subsystem === sub && a.level === 'critical') }))
+    .filter(o => !dismissed.includes(`st-${o.sub}-${o.since?.eventId ?? '0'}`))
+  const total = prog.length + crit.length + ongoing.length
   if (!total) return null
   const hide = (id: string) => setDismissed(d => [...d.slice(-40), id])
-  const shownProg = prog.slice(0, 3)
-  const shownCrit = crit.slice(0, Math.max(0, 3 - shownProg.length))
+  const shownOng = ongoing.slice(0, 3)
+  const shownProg = prog.slice(0, Math.max(0, 3 - shownOng.length))
+  const shownCrit = crit.slice(0, Math.max(0, 3 - shownOng.length - shownProg.length))
   return (
     <div className="toasts" role="status">
+      {shownOng.map(o => (
+        <div key={`st-${o.sub}`} className="toast crit">
+          <button className="toast-x" aria-label="dismiss" onClick={() => hide(`st-${o.sub}-${o.since?.eventId ?? '0'}`)}>×</button>
+          <button className="toast-body" onClick={onOpen}>
+            <span className="toast-tag"><i />CRITICAL</span> {o.sub} — ongoing{o.since && <> for <b>{fmtMs(now - o.since.at)}</b></>}
+            {o.since?.topFeatures?.[0] && <small>, {featureLabel(o.since.topFeatures[0].feature)}</small>}
+          </button>
+        </div>
+      ))}
       {shownProg.map(p => (
         <div key={p.eventId} className="toast prog">
           <button className="toast-x" aria-label="dismiss" onClick={() => hide(p.eventId)}>×</button>
@@ -79,13 +95,13 @@ export function AiAlerts({ ai, now, onOpen }: { ai: AiInfo | null | undefined; n
         <div key={a.eventId} className="toast crit">
           <button className="toast-x" aria-label="dismiss" onClick={() => hide(a.eventId)}>×</button>
           <button className="toast-body" onClick={onOpen}>
-            <b>AI anomaly</b> {a.subsystem} critical, score {a.score.toFixed(2)}
+            <span className="toast-tag"><i />CRITICAL</span> {a.subsystem}, score {a.score.toFixed(2)}
             {a.topFeatures?.[0] && <small>, {featureLabel(a.topFeatures[0].feature)}</small>}, {fmtMs(now - a.at)} ago
           </button>
         </div>
       ))}
       {total > 3 && (
-        <button className="toast more" onClick={onOpen}>+{total - 3} more on the AI tab</button>
+        <button className="toast more" onClick={onOpen}><span>+{total - 3} more on the AI tab</span></button>
       )}
     </div>
   )

@@ -24,12 +24,30 @@ export function ContinuityTimeline(props: {
       else live[b]++
     }
     const x = Array.from({ length: nb }, (_, i) => start + i * BUCKET + BUCKET / 2)
-    const waiting = (pick: (e: Delivered, at: number) => boolean) => x.map(xi => {
-      const at = xi + BUCKET / 2
-      return [xi, at > now ? null : events.filter(e => pick(e, at)).length] as [number, number | null]
-    })
-    const onShip = waiting((e, at) => e.generatedAt <= at && e.coastAt !== null && e.coastAt > at)
-    const atCoast = waiting((e, at) => e.coastAt !== null && e.coastAt <= at && (e.shoreAt === null || e.shoreAt > at))
+    // sampled at each bucket's end: how many records sat on the ship / at the MEC at that moment.
+    // One pass with difference arrays — the old filter-per-bucket was O(events × buckets) and
+    // froze the tab once a run grew to hours (2,000 buckets × 45k events).
+    const idx = (t: number) => Math.min(nb, Math.max(0, Math.floor((t - start) / BUCKET)))
+    const shipD = new Array(nb + 1).fill(0), coastD = new Array(nb + 1).fill(0)
+    const span = (d: number[], from: number, to: number | null) => {
+      const a = idx(from), b = to === null ? nb : idx(to)
+      if (b > a) { d[a]++; d[b]-- }
+    }
+    for (const e of events) {
+      if (e.coastAt !== null) {
+        span(shipD, e.generatedAt, e.coastAt)
+        span(coastD, e.coastAt, e.shoreAt)
+      }
+    }
+    const sample = (d: number[]) => {
+      let cur = 0
+      return x.map((xi, i) => {
+        cur += d[i]
+        return [xi, xi + BUCKET / 2 > now ? null : cur] as [number, number | null]
+      })
+    }
+    const onShip = sample(shipD)
+    const atCoast = sample(coastD)
     const lab = (text: string, color: string) => ({ formatter: text, fontSize: 10, color, position: 'end' })
     const series: object[] = [
       { name: 'Reached shore live', type: 'bar', stack: 'r', barWidth: '90%', itemStyle: { color: C.blue },
