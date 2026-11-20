@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Map Example</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="http://100.96.155.4:30793/livemap.js"></script>
+<style>
+  body{margin:0;padding:16px;font-family:system-ui,sans-serif;background:#f6f7f9}
+  #fleet{height:520px;border-radius:8px;overflow:hidden}
+  #info{margin-top:8px;color:#667080;font-size:13px}
+</style>
+</head>
+<body>
+<h3>Dashboard card: fleet map</h3>
+<div id="fleet"></div>
+<div id="info">Loading…</div>
+<script>
+  const lm = AnchorLiveMap.mount('fleet', {
+    api: 'http://100.96.155.4:30793',
+    theme: 'light',
+    onData: d => {
+      const warn = (d.conflicts && d.conflicts.items || []).length;
+      document.getElementById('info').textContent =
+        `${d.ues.length} ships · ${d.hazards.length} disasters · ${warn} collision warnings`;
+    },
+    onShipClick: name => console.log('ship clicked:', name),
+  });
+</script>
+</body>
+</html>
