@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ANCHOR Live Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--text:#1b1f24;--muted:#667080;--line:#e3e6ea;--accent:#1f6feb;
+--real:#111418;--moving:#1f6feb;--still:#8a94a3;--poa:#2da44e;--route:#1f6feb;--warn:#d4a72c;--bad:#cf222e;--reroute:#f08c00;
+--typhoon:#e5534b;--tsunami:#0969da}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1117;--panel:#161b22;--text:#e6edf3;--muted:#8b949e;--line:#30363d;--accent:#58a6ff;--real:#111418;--moving:#58a6ff;--still:#8b949e;--poa:#3fb950;--route:#58a6ff;--warn:#e3b341;--bad:#ff7b72;--reroute:#f08c00;--typhoon:#ff7b72;--tsunami:#58a6ff}}
+:root[data-theme="dark"]{--bg:#0d1117;--panel:#161b22;--text:#e6edf3;--muted:#8b949e;--line:#30363d;--accent:#58a6ff;--real:#111418;--moving:#58a6ff;--still:#8b949e;--poa:#3fb950;--route:#58a6ff;--warn:#e3b341;--bad:#ff7b72;--reroute:#f08c00;--typhoon:#ff7b72;--tsunami:#58a6ff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+.app{display:grid;grid-template-columns:1fr 340px;height:100vh}
+#map{height:100%;background:var(--bg)}
+#map.picking{cursor:crosshair}
+aside{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+header{padding:14px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:16px;margin:0 0 4px}
+h2{font-size:12px;margin:0;padding:10px 16px 6px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+.meta{color:var(--muted);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--poa);display:inline-block;flex:none}
+.dot.bad{background:var(--bad)}
+.legend i,.row .dot{box-shadow:0 0 0 1px color-mix(in srgb,var(--muted) 60%,transparent)}
+.legend{display:flex;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.scroll{overflow:auto;flex:1}
+.row{padding:8px 16px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center}
+.row:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.row .n{font-weight:600}
+.row .s{color:var(--muted);font-size:12px}
+.row .v{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.tag{font-size:11px;padding:0 6px;border-radius:9px;margin-left:4px;font-weight:600}
+.tag.t{background:color-mix(in srgb,var(--typhoon) 18%,transparent);color:var(--typhoon)}
+.tag.s{background:color-mix(in srgb,var(--tsunami) 18%,transparent);color:var(--tsunami)}
+.tag.r{background:color-mix(in srgb,var(--reroute) 18%,transparent);color:var(--reroute)}
+.rc{padding:8px 16px;border-bottom:1px solid var(--line);font-size:12px;cursor:pointer}
+.rc:hover{background:color-mix(in srgb,var(--reroute) 8%,transparent)}
+.rc b{color:var(--reroute);font-size:13px}
+.rc .s{color:var(--muted)}
+.leaflet-tooltip.rcl{background:var(--panel);color:var(--reroute);border:1px solid var(--reroute);box-shadow:none;font-size:11px;font-weight:700;padding:1px 5px}
+.leaflet-tooltip.rcl:before{display:none}
+.hz{padding:8px 16px;border-bottom:1px solid var(--line);font-size:12px}
+.hz b{font-size:13px}
+.hz .x{float:right;border:0;background:none;color:var(--muted);cursor:pointer;font-size:12px}
+.hz .x:hover{color:var(--bad)}
+.hz .s{color:var(--muted)}
+.empty{padding:6px 16px 10px;color:var(--muted);font-size:12px}
+details{border-bottom:1px solid var(--line)}
+summary{padding:10px 16px;cursor:pointer;font-weight:600;font-size:13px}
+.form{padding:0 16px 12px;display:grid;gap:8px;font-size:12px}
+.form label{display:grid;gap:3px;color:var(--muted)}
+.form .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+input,select,button{font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px;min-width:0}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);cursor:pointer;font-weight:600}
+button.ghost{cursor:pointer}
+.msg{font-size:12px;color:var(--muted);min-height:1em}
+.err{display:none;margin:10px 16px;padding:8px 10px;border-radius:6px;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad);font-size:12px}
+.leaflet-tooltip.lbl{background:var(--panel);color:var(--text);border:1px solid var(--line);box-shadow:none;font-size:11px;padding:1px 5px}
+.leaflet-tooltip.lbl:before{display:none}
+.leaflet-tooltip.hzl{background:transparent;border:0;box-shadow:none;font-weight:700;font-size:13px;color:var(--text);text-shadow:0 0 3px var(--panel),0 0 3px var(--panel)}
+.leaflet-tooltip.hzl:before{display:none}
+@media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:60vh auto;height:auto;min-height:100vh}aside{border-left:0;border-top:1px solid var(--line)}}
+html.embed .app{grid-template-columns:1fr;grid-template-rows:none;height:100vh;min-height:0}
+html.embed aside{display:none}
+</style>
+<script>
+// ?embed=1 → map only (for iframes); ?theme=light|dark forces a theme
+(function () {
+  var q = new URLSearchParams(location.search), r = document.documentElement;
+  if (q.get('embed') === '1') r.classList.add('embed');
+  var t = q.get('theme'); if (t === 'light' || t === 'dark') r.setAttribute('data-theme', t);
+})();
+</script>
+</head>
+<body>
+<div class="app">
+  <div id="map"></div>
+  <aside>
+    <header>
+      <h1>ANCHOR Live Map</h1>
+      <div class="meta"><span id="st" class="dot"></span><span id="sbx">Connecting…</span><span id="upd"></span></div>
+    </header>
+    <div class="legend">
+      <span><i style="background:var(--real)"></i>Real ship</span>
+      <span><i style="background:var(--moving)"></i>Moving</span>
+      <span><i style="background:var(--still)"></i>Stationary</span>
+      <span><i style="background:var(--poa)"></i>Base station</span>
+      <span><i style="background:var(--warn)"></i>Degraded</span>
+      <span><i style="background:var(--bad)"></i>Severe / down</span>
+      <span><i style="background:var(--reroute)"></i>Rerouted</span>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="scroll">
+      <details id="ctl">
+        <summary>Trigger a disaster</summary>
+        <div class="form">
+          <div class="two">
+            <label>Type<select id="f-type"><option value="typhoon">Typhoon</option><option value="tsunami">Tsunami</option></select></label>
+            <label>Name<input id="f-name" placeholder="e.g. Typhoon Haeoreum"></label>
+          </div>
+          <div class="two">
+            <label>Position (lon, lat)<input id="f-pos" placeholder="Click the map"></label>
+            <label>&nbsp;<button class="ghost" id="f-pick" type="button">Pick on map</button></label>
+          </div>
+          <div class="two" id="f-typhoon">
+            <label>Radius km<input id="f-radius" type="number" value="80"></label>
+            <label>Heading ° (N=0)<input id="f-heading" type="number" value="30"></label>
+          </div>
+          <div class="two" id="f-tsunami" hidden>
+            <label>Quake damage radius km<input id="f-quake" type="number" value="60"></label>
+            <label>Max spread km<input id="f-max" type="number" value="250"></label>
+          </div>
+          <div class="two">
+            <label>Speed km/h<input id="f-speed" type="number" value="300"></label>
+            <label>Duration min<input id="f-dur" type="number" value="30"></label>
+          </div>
+          <label><span><input id="f-net" type="checkbox" checked style="vertical-align:-2px"> Degrade base station links</span></label>
+          <button class="primary" id="f-go" type="button">Trigger</button>
+          <div class="msg" id="f-msg"></div>
+        </div>
+      </details>
+      <h2>Collision warnings <span id="cf-age" style="font-weight:400"></span></h2>
+      <div id="cf"></div>
+      <h2>Route changes <span style="font-weight:400">· last 30 min</span></h2>
+      <div id="rc"></div>
+      <h2>Disasters</h2>
+      <div id="hz"></div>
+      <h2>Ships</h2>
+      <div id="list"></div>
+    </div>
+  </aside>
+</div>
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+const map = L.map('map').setView([34.6, 129.6], 8);
+// Esri Ocean basemap: English place names (OSM tiles use local Korean/Japanese labels)
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {maxZoom: 13, attribution: 'Tiles &copy; Esri, GEBCO, NOAA, Garmin'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', {maxZoom: 13}).addTo(map);
+const layers = {cf: null, hz: L.layerGroup().addTo(map), poa: L.layerGroup().addTo(map), route: L.layerGroup().addTo(map), ue: L.layerGroup().addTo(map)};
+layers.cf = L.layerGroup().addTo(map);
+layers.rc = L.layerGroup().addTo(map);
+let lastRc = [];
+const ueMarkers = {}, routes = {};
+let fitted = false, picking = false, lastHz = [];
+const REAL = 'ship-001';
+const ll = c => [c[1], c[0]];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const color = u => u.assetName === REAL ? css('--real') : (u.velocity ? css('--moving') : css('--still'));
+const poaColor = p => !p.impact ? css('--poa') : (p.impact.level === 'outer' ? css('--warn') : css('--bad'));
+
+function drawPoas(poas) {
+  layers.poa.clearLayers();
+  for (const p of poas) {
+    const c = poaColor(p), i = p.impact;
+    L.circle(ll(p.location.coordinates), {radius: p.radius || 0, color: c, weight: 1, opacity: i ? .8 : .45, fillOpacity: i ? .08 : .04, interactive: false}).addTo(layers.poa);
+    const tip = `<b>${esc(p.assetName)}</b>` + (i ? `<br>${i.label}: latency ${i.netChar.latency} ms · loss ${i.netChar.packetLoss}% · DL ${i.netChar.throughputDl} Mbps` +
+      (i.base ? `<br><span style="opacity:.7">Normal: latency ${i.base.latency} ms · loss ${i.base.packetLoss}% · DL ${i.base.throughputDl} Mbps</span>` : '') : '<br>Normal');
+    L.circleMarker(ll(p.location.coordinates), {radius: i ? 6 : 4, color: c, fillColor: c, fillOpacity: 1, weight: 1}).bindTooltip(tip).addTo(layers.poa);
+  }
+}
+
+function drawHazards(hz) {
+  layers.hz.clearLayers();
+  for (const h of hz) {
+    const c = ll(h.center);
+    if (h.type === 'typhoon') {
+      const col = css('--typhoon');
+      L.circle(c, {radius: h.radiusKm * 1000, color: col, weight: 2, fillColor: col, fillOpacity: .12, dashArray: '6 4'}).addTo(layers.hz);
+      L.circle(c, {radius: h.coreRadiusKm * 1000, color: col, weight: 1, fillColor: col, fillOpacity: .25, interactive: false}).addTo(layers.hz);
+      L.polyline(h.track.map(ll), {color: col, weight: 2, opacity: .8, dashArray: '2 6'}).addTo(layers.hz);
+      L.circleMarker(c, {radius: 3, color: col, fillOpacity: 1}).bindTooltip('🌀 ' + esc(h.name), {permanent: true, direction: 'top', className: 'hzl'}).addTo(layers.hz);
+    } else {
+      const col = css('--tsunami');
+      L.circle(c, {radius: h.maxRadiusKm * 1000, color: col, weight: 1, fill: false, dashArray: '4 6'}).addTo(layers.hz);
+      L.circle(c, {radius: h.quakeRadiusKm * 1000, color: css('--bad'), weight: 1, fillColor: css('--bad'), fillOpacity: .15}).addTo(layers.hz);
+      if (h.waveRadiusKm > 0) L.circle(c, {radius: h.waveRadiusKm * 1000, color: col, weight: 3, fillColor: col, fillOpacity: .08}).addTo(layers.hz);
+      L.circleMarker(c, {radius: 4, color: css('--bad'), fillOpacity: 1}).bindTooltip('🌊 ' + esc(h.name), {permanent: true, direction: 'top', className: 'hzl'}).addTo(layers.hz);
+    }
+  }
+  const mm = s => `${Math.floor(s / 60)}m ${s % 60}s`;
+  $('hz').innerHTML = hz.length ? hz.map(h => {
+    const poas = Object.entries(h.poas || {});
+    return `<div class="hz"><button class="x" data-id="${esc(h.id)}">Delete</button>
+      <b>${h.type === 'typhoon' ? '🌀' : '🌊'} ${esc(h.name)}</b> <span class="s">${esc(h.id)}</span><br>
+      <span class="s">${h.type === 'typhoon' ? `radius ${h.radiusKm} km · heading ${h.headingDeg}° · ${h.speedKmh} km/h` : `wave front ${h.waveRadiusKm}/${h.maxRadiusKm} km · ${h.speedKmh} km/h`} · ${mm(h.remainingSec)} left</span><br>
+      Base stations: ${poas.length ? poas.map(([n, l]) => esc(n) + '(' + ({outer: 'degraded', core: 'severe', flooded: 'flooded', down: 'down'}[l]) + ')').join(', ') : 'none'}<br>
+      Ships: ${h.ships.length ? h.ships.map(esc).join(', ') : 'none'}</div>`;
+  }).join('') : '<div class="empty">No active disasters</div>';
+}
+
+function drawConflicts(cf, ues) {
+  const pos = Object.fromEntries(ues.map(u => [u.assetName, ll(u.location.coordinates)]));
+  layers.cf.clearLayers();
+  const items = (cf && cf.items) || [], bad = css('--bad');
+  const fmt = c => [c.cpaNm != null ? `CPA ${c.cpaNm} nm` : '', c.tcpaMin != null ? `TCPA ${c.tcpaMin} min` : '', c.level || c.severity || ''].filter(Boolean).join(' · ');
+  for (const c of items) {
+    if (!pos[c.a] || !pos[c.b]) continue;
+    L.polyline([pos[c.a], pos[c.b]], {color: bad, weight: 4, opacity: .9}).bindTooltip(`<b>${esc(c.a)} ↔ ${esc(c.b)}</b><br>${esc(fmt(c))}`, {sticky: true}).addTo(layers.cf);
+    for (const n of [c.a, c.b]) L.circleMarker(pos[n], {radius: 12, color: bad, weight: 2, fill: false, interactive: false}).addTo(layers.cf);
+  }
+  $('cf-age').textContent = cf && cf.ct ? `· updated ${cf.ageSec}s ago` : '';
+  $('cf').innerHTML = items.length ? items.map(c => `<div class="hz"><b style="color:var(--bad)">⚠ ${esc(c.a)} ↔ ${esc(c.b)}</b><br><span class="s">${esc(fmt(c)) || 'collision risk'}</span></div>`).join('')
+    : `<div class="empty">${cf && cf.error ? 'Cannot read fleet-ai: ' + esc(cf.error) : 'No active warnings'}</div>`;
+}
+
+// Route changes (e.g. fleet-ai avoiding a collision or a typhoon): old path dashed, new path bold purple.
+const ago = t => { const s = Math.max(0, Math.round(Date.now() / 1000 - t)); return s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago'; };
+const RC_MAP_MIN = 15;  // draw on the map for 15 min, list for 30 min
+const steering = by => /^fleet-ai:(avoid|return)/.test(by || '');  // restore / manual changes: list only
+function drawRouteChanges(changes, ues) {
+  layers.rc.clearLayers();
+  lastRc = changes || [];
+  const pos = Object.fromEntries(ues.map(u => [u.assetName, ll(u.location.coordinates)]));
+  const latest = {};
+  for (const c of lastRc) if (!latest[c.ship] || latest[c.ship].at < c.at) latest[c.ship] = c;
+  const col = css('--reroute'), now = Date.now() / 1000;
+  for (const c of Object.values(latest)) {
+    if (now - c.at > RC_MAP_MIN * 60 || !steering(c.by)) continue;
+    const why = c.reason ? '<br>' + esc(c.reason) : '';
+    const tip = `<b>${esc(c.ship)}</b> rerouted by <b>${esc(c.by)}</b> · ${ago(c.at)}${why}`;
+    if (c.before && c.before.length > 1)
+      L.polyline(c.before.map(ll), {color: css('--still'), weight: 2, opacity: .8, dashArray: '3 6'}).bindTooltip('Previous route of ' + esc(c.ship), {sticky: true}).addTo(layers.rc);
+    if (c.after && c.after.length > 1)
+      L.polyline(c.after.map(ll), {color: col, weight: 4, opacity: .9}).bindTooltip(tip, {sticky: true}).addTo(layers.rc);
+    if (c.from) L.circleMarker(ll(c.from), {radius: 5, color: col, fillColor: col, fillOpacity: 1, weight: 1}).bindTooltip('⟲ ' + esc(c.by), {permanent: true, direction: 'left', offset: [-6, 0], className: 'rcl'}).addTo(layers.rc);
+    if (pos[c.ship]) L.circleMarker(pos[c.ship], {radius: 11, color: col, weight: 2, fill: false, interactive: false}).addTo(layers.rc);
+  }
+  const rows = [...lastRc].sort((a, b) => b.at - a.at).slice(0, 10);
+  $('rc').innerHTML = rows.length ? rows.map(c => `<div class="rc" data-n="${esc(c.ship)}"><b>⟲ ${esc(c.ship)}</b> <span class="s">by ${esc(c.by)} · ${ago(c.at)}</span>${c.reason ? `<br><span class="s">${esc(c.reason)}</span>` : ''}</div>`).join('')
+    : '<div class="empty">No route changes</div>';
+}
+
+function drawUes(ues, hz) {
+  const seen = new Set(), inHz = {};
+  for (const h of hz) for (const s of h.ships) (inHz[s] = inHz[s] || []).push(h.type);
+  for (const u of ues) {
+    const n = u.assetName; seen.add(n);
+    const pos = ll(u.location.coordinates), col = color(u);
+    const tip = `<b>${esc(n)}</b><br>${pos[0].toFixed(4)}, ${pos[1].toFixed(4)}<br>speed ${u.velocity || 0} · ${u.eopMode || '-'}<br>base station ${(u.poaInRange || []).map(esc).join(', ') || '-'}` +
+      (inHz[n] ? '<br>⚠ Inside a disaster zone' : '');
+    if (!ueMarkers[n]) {
+      ueMarkers[n] = L.circleMarker(pos, {radius: n === REAL ? 8 : 6, weight: 2, color: '#fff', fillColor: col, fillOpacity: 1})
+        .bindTooltip(n, {permanent: true, direction: 'right', offset: [8, 0], className: 'lbl'}).bindPopup(tip).addTo(layers.ue);
+    } else { ueMarkers[n].setLatLng(pos).setStyle({fillColor: col, color: inHz[n] ? css('--bad') : '#fff'}).setPopupContent(tip); }
+    // fleet-ai is steering this ship (avoiding / returning): draw its current route bold orange
+    const rr = /^fleet-ai:(avoid|return)/.test(u.routeBy || '');
+    const coords = u.path && u.path.coordinates, key = coords ? JSON.stringify(coords) + (rr ? '|rr' : '') : '';
+    if (routes[n] && routes[n].key !== key) { layers.route.removeLayer(routes[n].line); delete routes[n]; }
+    if (coords && !routes[n]) routes[n] = {key, line: L.polyline(coords.map(ll), {color: rr ? '#f08c00' : (n === REAL ? css('--real') : css('--route')), weight: rr ? 4 : 2, opacity: rr ? .9 : .55, dashArray: u.velocity ? null : '4 4'}).addTo(layers.route)};
+  }
+  for (const n in ueMarkers) if (!seen.has(n)) { layers.ue.removeLayer(ueMarkers[n]); delete ueMarkers[n]; }
+  for (const n in routes) if (!seen.has(n)) { layers.route.removeLayer(routes[n].line); delete routes[n]; }
+  if (!fitted && ues.length) { map.fitBounds(L.latLngBounds(ues.map(u => ll(u.location.coordinates))).pad(.2)); fitted = true; }
+  const sorted = [...ues].sort((a, b) => (b.assetName === REAL) - (a.assetName === REAL) || !!inHz[b.assetName] - !!inHz[a.assetName] || (b.velocity || 0) - (a.velocity || 0) || a.assetName.localeCompare(b.assetName));
+  $('list').innerHTML = sorted.map(u => {
+    const c = u.location.coordinates, t = inHz[u.assetName] || [];
+    return `<div class="row" data-n="${esc(u.assetName)}"><i class="dot" style="background:${color(u)}"></i>
+      <div><div class="n">${esc(u.assetName)}${t.includes('typhoon') ? '<span class="tag t">typhoon</span>' : ''}${t.includes('tsunami') ? '<span class="tag s">tsunami</span>' : ''}${steering(u.routeBy) ? '<span class="tag r">rerouted</span>' : ''}</div>
+      <div class="s">${(u.poaInRange || []).map(esc).join(', ') || 'no base station'}</div></div>
+      <div class="v">${c[1].toFixed(3)}, ${c[0].toFixed(3)}<br>${u.velocity ? u.velocity + ' m/s' : 'stationary'}</div></div>`;
+  }).join('');
+}
+
+$('rc').addEventListener('click', e => {
+  const r = e.target.closest('.rc'); if (!r) return;
+  const m = ueMarkers[r.dataset.n]; if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 9)); m.openPopup(); }
+});
+$('list').addEventListener('click', e => {
+  const r = e.target.closest('.row'); if (!r) return;
+  const m = ueMarkers[r.dataset.n]; if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 10)); m.openPopup(); }
+});
+
+// ---- hazard form
+const typeSel = $('f-type');
+typeSel.onchange = () => { const t = typeSel.value === 'typhoon'; $('f-typhoon').hidden = !t; $('f-tsunami').hidden = t; $('f-speed').value = t ? 300 : 500; };
+$('f-pick').onclick = () => { picking = true; $('map').classList.add('picking'); $('f-msg').textContent = 'Click the map to set the position'; };
+map.on('click', e => {
+  if (!picking) return;
+  picking = false; $('map').classList.remove('picking');
+  $('f-pos').value = e.latlng.lng.toFixed(4) + ', ' + e.latlng.lat.toFixed(4); $('f-msg').textContent = '';
+});
+async function api(method, path, body) {
+  const r = await fetch(path, {method, headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+$('f-go').onclick = async () => {
+  const pos = $('f-pos').value.split(',').map(Number);
+  if (pos.length !== 2 || pos.some(isNaN)) { $('f-msg').textContent = 'Pick a position first'; return; }
+  const t = typeSel.value, num = id => Number($(id).value);
+  const body = {type: t, center: pos, name: $('f-name').value || undefined, speedKmh: num('f-speed'), durationMin: num('f-dur'), affectNetwork: $('f-net').checked};
+  if (t === 'typhoon') Object.assign(body, {radiusKm: num('f-radius'), headingDeg: num('f-heading')});
+  else Object.assign(body, {quakeRadiusKm: num('f-quake'), maxRadiusKm: num('f-max')});
+  try { const h = await api('POST', 'api/hazards', body); $('f-msg').textContent = 'Triggered: ' + h.id; tick(); }
+  catch (e) { $('f-msg').textContent = 'Failed: ' + e.message; }
+};
+$('hz').addEventListener('click', async e => {
+  const b = e.target.closest('.x'); if (!b) return;
+  try { await api('DELETE', 'api/hazards/' + encodeURIComponent(b.dataset.id)); tick(); } catch (err) { $('f-msg').textContent = 'Delete failed: ' + err.message; }
+});
+
+async function tick() {
+  try {
+    const r = await fetch('api/geodata', {cache: 'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    const hz = d.hazards || [];
+    drawHazards(hz); drawPoas(d.poas); drawRouteChanges(d.routeChanges, d.ues); drawUes(d.ues, hz); drawConflicts(d.conflicts, d.ues);
+    $('sbx').textContent = 'Sandbox ' + d.sandbox + ' · ' + d.ues.length + ' ships';
+    $('upd').textContent = new Date(d.ts * 1000).toLocaleTimeString('en-GB');
+    $('st').className = 'dot'; $('err').style.display = 'none';
+  } catch (e) {
+    $('st').className = 'dot bad'; $('err').textContent = 'No data: ' + e.message; $('err').style.display = 'block';
+  }
+}
+tick(); setInterval(tick, 1500);
+</script>
+</body>
+</html>
